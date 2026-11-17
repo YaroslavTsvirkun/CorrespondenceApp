@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="AppHost/CorrespondenceSystem.AppHost.csproj" />
+  <Project Path="ServiceDefaults/CorrespondenceSystem.ServiceDefaults.csproj" />
+  <Project Path="backend/CorrespondenceApi.csproj" />
+</Solution>
