@@ -2,7 +2,6 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
-using CorrespondenceApi.Domain;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -46,29 +45,7 @@ public static class Permissions
         [TasksWrite] = [TasksAssign, TasksExecute],
     };
 
-    public static readonly (string Code, string Category, string Description)[] Catalog =
-    [
-        (DocumentsReadAll, "Документи", "Перегляд усієї кореспонденції"),
-        (DocumentsReadDepartment, "Документи", "Перегляд кореспонденції свого підрозділу"),
-        (DocumentsReadInvolved, "Документи", "Перегляд лише задіяних документів"),
-        (DocumentsCreate, "Документи", "Реєстрація документів"),
-        (DocumentsUpdate, "Документи", "Редагування документів"),
-        (DocumentsDelete, "Документи", "Видалення документів"),
-        (ResolutionsCreate, "Резолюції", "Накладання резолюцій"),
-        (TasksAssign, "Доручення", "Призначення доручень"),
-        (TasksExecute, "Доручення", "Виконання доручень"),
-        (CorrespondentsManage, "Довідники", "Ведення кореспондентів"),
-        (DictionariesManage, "Довідники", "Ведення довідників"),
-        (EmployeesManage, "Довідники", "Ведення працівників"),
-        (DepartmentsManage, "Довідники", "Ведення підрозділів"),
-        (ReportsView, "Звіти", "Перегляд звітів"),
-        (DashboardOverview, "Дашборди", "Дашборд «Огляд»"),
-        (DashboardControl, "Дашборди", "Дашборд контролю"),
-        (DashboardMyTasks, "Дашборди", "Дашборд «Мої доручення»"),
-        (UsersManage, "Адміністрування", "Керування користувачами та ролями"),
-        (OrganizationsManage, "Адміністрування", "Керування організаціями (супер-адмін)"),
-        (SettingsManage, "Адміністрування", "Налаштування організації (нумерація документів)"),
-    ];
+    // Каталог пермішенів (опис, категорія) зберігається в БД: Database/Seed/001_ReferenceData.sql
 }
 
 // ---- Поточний користувач (з клеймів JWT) ----
@@ -144,13 +121,13 @@ public class TokenService(IConfiguration config)
     // Токен містить лише ідентифікатор користувача; employeeId/departmentId та
     // пермішени додаються до принципала ПЕР-ЗАПИТ із БД (PermissionClaimsTransformation),
     // тож зміни прав діють одразу, без перевидання токена.
-    public string Create(AppUser user)
+    public string Create(int userId, string userName, string fullName)
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, user.Id.ToString()),
-            new(ClaimTypes.Name, user.UserName),
-            new("fullName", user.FullName),
+            new(ClaimTypes.NameIdentifier, userId.ToString()),
+            new(ClaimTypes.Name, userName),
+            new("fullName", fullName),
         };
 
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["Jwt:Key"]!));
@@ -188,27 +165,15 @@ public static class PasswordHasher
 }
 
 // ---- Зона видимості документів (за пермішенами поточного користувача) ----
+// Рівень передається у скалярну функцію БД dbo.fn_CanReadDocument:
+//   3 — уся кореспонденція, 2 — свого підрозділу, 1 — лише задіяні документи, 0 — немає доступу.
 public static class DocumentScope
 {
-    public static IQueryable<Document> ApplyRead(IQueryable<Document> q, ICurrentUser u)
+    public static byte Level(ICurrentUser u)
     {
-        if (u.Has(Permissions.DocumentsReadAll))
-            return q;
-
-        if (u.Has(Permissions.DocumentsReadDepartment) && u.DepartmentId is int dep)
-            return q.Where(d =>
-                d.SenderDepartmentId == dep ||
-                d.ReceiverDepartmentId == dep ||
-                (d.AuthorEmployee != null && d.AuthorEmployee.DepartmentId == dep));
-
-        if (u.Has(Permissions.DocumentsReadInvolved) && u.EmployeeId is int emp)
-            return q.Where(d =>
-                d.AuthorEmployeeId == emp ||
-                (d.Registration != null && d.Registration.RegistrarEmployeeId == emp) ||
-                d.Resolutions.Any(r => r.AuthorEmployeeId == emp) ||
-                d.Tasks.Any(t => t.ExecutorEmployeeId == emp));
-
-        // немає жодного дозволу перегляду
-        return q.Where(_ => false);
+        if (u.Has(Permissions.DocumentsReadAll)) return 3;
+        if (u.Has(Permissions.DocumentsReadDepartment) && u.DepartmentId is not null) return 2;
+        if (u.Has(Permissions.DocumentsReadInvolved) && u.EmployeeId is not null) return 1;
+        return 0;
     }
 }

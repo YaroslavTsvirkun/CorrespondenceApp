@@ -1,10 +1,11 @@
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Common;
+using CorrespondenceApi.Infrastructure.Database;
+using Dapper;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace CorrespondenceApi.Features.Lookups;
 
-// Слайс: усі довідники для випадних списків інтерфейсу.
+// Слайс: усі довідники для випадних списків інтерфейсу (один запит — кілька наборів).
 public static class LookupsEndpoints
 {
     public static void MapLookups(IEndpointRouteBuilder app)
@@ -35,26 +36,33 @@ public static class GetLookups
         IReadOnlyList<Option> Employees,
         IReadOnlyList<Option> Correspondents);
 
-    public class Handler(AppDbContext db) : IRequestHandler<Query, Response>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, Response>
     {
-        public async Task<Response> Handle(Query q, CancellationToken ct) => new(
-            await db.Directions.OrderBy(x => x.Id)
-                .Select(x => new DirectionOption(x.Id, x.Code, x.Name)).ToListAsync(ct),
-            await db.DocumentTypes.OrderBy(x => x.Name)
-                .Select(x => new Option(x.Id, x.Name)).ToListAsync(ct),
-            await db.DocumentStatuses.OrderBy(x => x.Id)
-                .Select(x => new StatusOption(x.Id, x.Name, x.IsFinal)).ToListAsync(ct),
-            await db.Channels.OrderBy(x => x.Name)
-                .Select(x => new Option(x.Id, x.Name)).ToListAsync(ct),
-            await db.CorrespondentTypes.OrderBy(x => x.Name)
-                .Select(x => new Option(x.Id, x.Name)).ToListAsync(ct),
-            await db.TaskStatuses.OrderBy(x => x.Id)
-                .Select(x => new StatusOption(x.Id, x.Name, x.IsFinal)).ToListAsync(ct),
-            await db.Departments.OrderBy(x => x.Name)
-                .Select(x => new Option(x.Id, x.Name)).ToListAsync(ct),
-            await db.Employees.OrderBy(x => x.FullName)
-                .Select(x => new Option(x.Id, x.FullName)).ToListAsync(ct),
-            await db.Correspondents.OrderBy(x => x.Name)
-                .Select(x => new Option(x.Id, x.Name)).ToListAsync(ct));
+        public async Task<Response> Handle(Query q, CancellationToken ct)
+        {
+            await using var c = await db.OpenAsync(ct);
+            using var grid = await c.QueryMultipleAsync(new CommandDefinition($"""
+                SELECT Id, Code, Name FROM dbo.DocumentDirection ORDER BY Id;
+                SELECT Id, Name FROM dbo.DocumentType ORDER BY Name;
+                SELECT Id, Name, IsFinal FROM dbo.DocumentStatus ORDER BY Id;
+                SELECT Id, Name FROM dbo.DeliveryChannel ORDER BY Name;
+                SELECT Id, Name FROM dbo.CorrespondentType ORDER BY Name;
+                SELECT Id, Name, IsFinal FROM dbo.TaskStatus ORDER BY Id;
+                SELECT d.Id, d.Name FROM dbo.Department d WHERE {SqlScope.TenantFilter("d")} ORDER BY d.Name;
+                SELECT e.Id, e.FullName AS Name FROM dbo.Employee e WHERE {SqlScope.TenantFilter("e")} ORDER BY e.FullName;
+                SELECT x.Id, x.Name FROM dbo.Correspondent x WHERE {SqlScope.TenantFilter("x")} ORDER BY x.Name;
+                """, SqlScope.Tenant(user), cancellationToken: ct));
+
+            return new Response(
+                (await grid.ReadAsync<DirectionOption>()).AsList(),
+                (await grid.ReadAsync<Option>()).AsList(),
+                (await grid.ReadAsync<StatusOption>()).AsList(),
+                (await grid.ReadAsync<Option>()).AsList(),
+                (await grid.ReadAsync<Option>()).AsList(),
+                (await grid.ReadAsync<StatusOption>()).AsList(),
+                (await grid.ReadAsync<Option>()).AsList(),
+                (await grid.ReadAsync<Option>()).AsList(),
+                (await grid.ReadAsync<Option>()).AsList());
+        }
     }
 }

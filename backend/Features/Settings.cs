@@ -1,9 +1,8 @@
 using CorrespondenceApi.Common;
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Infrastructure.Database;
 using FluentValidation;
 using FluentValidation.Results;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace CorrespondenceApi.Features.Settings;
 
@@ -36,20 +35,22 @@ public static class GetRegistrationSetting
     public record Query : IRequest<Dto>;
     public record Dto(int OrganizationId, string OrganizationName, string Pattern, string Preview);
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Query, Dto>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, Dto>
     {
+        // Попередній перегляд формує скалярна функція БД dbo.fn_FormatRegistrationNumber
         public async Task<Dto> Handle(Query q, CancellationToken ct)
         {
             var orgId = SettingsEndpoints.RequireOrg(user);
-            var org = await db.Organizations.IgnoreQueryFilters().Where(o => o.Id == orgId)
-                .Select(o => new { o.Id, o.Name, o.RegistrationNumberPattern }).FirstAsync(ct);
-            var typeCode = await db.DocumentTypes.OrderBy(t => t.Name)
-                .Select(t => t.Code).FirstOrDefaultAsync(ct);
-            var dirCode = await db.Directions.OrderBy(d => d.Id)
-                .Select(d => d.Code).FirstOrDefaultAsync(ct);
-            var preview = RegistrationNumberFormatter.Format(
-                org.RegistrationNumberPattern, 1, DateTime.Now.Year, typeCode, dirCode);
-            return new Dto(org.Id, org.Name, org.RegistrationNumberPattern, preview);
+            return await db.QuerySingleOrDefaultAsync<Dto>("""
+                SELECT o.Id AS OrganizationId, o.Name AS OrganizationName,
+                       o.RegistrationNumberPattern AS Pattern,
+                       dbo.fn_FormatRegistrationNumber(o.RegistrationNumberPattern, 1, YEAR(GETDATE()),
+                           (SELECT TOP (1) Code FROM dbo.DocumentType ORDER BY Name),
+                           (SELECT TOP (1) Code FROM dbo.DocumentDirection ORDER BY Id)) AS Preview
+                FROM dbo.Organization o
+                WHERE o.Id = @orgId
+                """, new { orgId }, ct)
+                ?? throw new NotFoundException($"Організацію #{orgId} не знайдено");
         }
     }
 }
@@ -64,14 +65,14 @@ public static class UpdateRegistrationSetting
         public Validator() => RuleFor(x => x.Data.Pattern).NotEmpty().MaximumLength(100);
     }
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Command>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command>
     {
         public async Task Handle(Command c, CancellationToken ct)
         {
             var orgId = SettingsEndpoints.RequireOrg(user);
-            var org = await db.Organizations.IgnoreQueryFilters().FirstAsync(o => o.Id == orgId, ct);
-            org.RegistrationNumberPattern = c.Data.Pattern.Trim();
-            await db.SaveChangesAsync(ct);
+            await db.ExecuteAsync(
+                "UPDATE dbo.Organization SET RegistrationNumberPattern = @pattern WHERE Id = @orgId",
+                new { pattern = c.Data.Pattern.Trim(), orgId }, ct);
         }
     }
 }

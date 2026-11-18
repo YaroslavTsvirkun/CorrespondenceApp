@@ -1,10 +1,9 @@
 using CorrespondenceApi.Common;
-using CorrespondenceApi.Domain;
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Infrastructure.Database;
 using FluentValidation;
 using FluentValidation.Results;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 
 namespace CorrespondenceApi.Features.Dictionaries;
 
@@ -43,22 +42,34 @@ public static class DictionariesEndpoints
     }
 }
 
+/// <summary>Відповідність «вид довідника» → таблиця БД (білий список — захист від SQL-ін'єкцій).</summary>
+internal static class DictionaryTables
+{
+    public sealed record Table(string Name, bool HasCode);
+
+    private static readonly Dictionary<string, Table> Map = new(StringComparer.Ordinal)
+    {
+        ["document-types"] = new("dbo.DocumentType", true),
+        ["channels"] = new("dbo.DeliveryChannel", false),
+        ["correspondent-types"] = new("dbo.CorrespondentType", false),
+    };
+
+    public static Table Resolve(string kind) =>
+        Map.TryGetValue(kind, out var t) ? t : throw new NotFoundException($"Невідомий довідник: {kind}");
+}
+
 public static class GetDictionary
 {
     public record Query(string Kind) : IRequest<IReadOnlyList<DictDto>>;
 
-    public class Handler(AppDbContext db) : IRequestHandler<Query, IReadOnlyList<DictDto>>
+    public class Handler(Db db) : IRequestHandler<Query, IReadOnlyList<DictDto>>
     {
-        public async Task<IReadOnlyList<DictDto>> Handle(Query q, CancellationToken ct) => q.Kind switch
+        public Task<IReadOnlyList<DictDto>> Handle(Query q, CancellationToken ct)
         {
-            "document-types" => await db.DocumentTypes.OrderBy(x => x.Name)
-                .Select(x => new DictDto(x.Id, x.Name, x.Description, x.Code)).ToListAsync(ct),
-            "channels" => await db.Channels.OrderBy(x => x.Name)
-                .Select(x => new DictDto(x.Id, x.Name, x.Description, null)).ToListAsync(ct),
-            "correspondent-types" => await db.CorrespondentTypes.OrderBy(x => x.Name)
-                .Select(x => new DictDto(x.Id, x.Name, x.Description, null)).ToListAsync(ct),
-            _ => throw new NotFoundException($"Невідомий довідник: {q.Kind}"),
-        };
+            var t = DictionaryTables.Resolve(q.Kind);
+            var code = t.HasCode ? "Code" : "CAST(NULL AS nvarchar(20)) AS Code";
+            return db.QueryAsync<DictDto>($"SELECT Id, Name, Description, {code} FROM {t.Name} ORDER BY Name", null, ct);
+        }
     }
 }
 
@@ -71,36 +82,25 @@ public static class SaveDictionary
         public Validator() => RuleFor(x => x.Data.Name).NotEmpty().MaximumLength(100);
     }
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command, int>
+    public class Handler(Db db) : IRequestHandler<Command, int>
     {
         public async Task<int> Handle(Command c, CancellationToken ct)
         {
-            switch (c.Kind)
-            {
-                case "document-types":
-                    return await Upsert(db.DocumentTypes, c, () => new DocumentType(),
-                        (e, d) => { e.Name = d.Name; e.Description = d.Description; e.Code = d.Code; }, ct);
-                case "channels":
-                    return await Upsert(db.Channels, c, () => new DeliveryChannel(),
-                        (e, d) => { e.Name = d.Name; e.Description = d.Description; }, ct);
-                case "correspondent-types":
-                    return await Upsert(db.CorrespondentTypes, c, () => new CorrespondentType(),
-                        (e, d) => { e.Name = d.Name; e.Description = d.Description; }, ct);
-                default:
-                    throw new NotFoundException($"Невідомий довідник: {c.Kind}");
-            }
-        }
+            var t = DictionaryTables.Resolve(c.Kind);
+            var param = new { c.Id, c.Data.Name, c.Data.Description, c.Data.Code };
 
-        private async Task<int> Upsert<T>(DbSet<T> set, Command c, Func<T> create,
-            Action<T, DictInput> apply, CancellationToken ct) where T : class
-        {
-            var e = c.Id is int id
-                ? await set.FindAsync([id], ct) ?? throw new NotFoundException($"Запис #{id} не знайдено")
-                : create();
-            apply(e, c.Data);
-            if (c.Id is null) set.Add(e);
-            await db.SaveChangesAsync(ct);
-            return (int)typeof(T).GetProperty("Id")!.GetValue(e)!;
+            if (c.Id is null)
+                return await db.ScalarAsync<int>(t.HasCode
+                    ? $"INSERT {t.Name} (Name, Description, Code) VALUES (@Name, @Description, @Code); SELECT CAST(SCOPE_IDENTITY() AS int);"
+                    : $"INSERT {t.Name} (Name, Description) VALUES (@Name, @Description); SELECT CAST(SCOPE_IDENTITY() AS int);",
+                    param, ct);
+
+            var affected = await db.ExecuteAsync(t.HasCode
+                ? $"UPDATE {t.Name} SET Name = @Name, Description = @Description, Code = @Code WHERE Id = @Id"
+                : $"UPDATE {t.Name} SET Name = @Name, Description = @Description WHERE Id = @Id",
+                param, ct);
+            if (affected == 0) throw new NotFoundException($"Запис #{c.Id} не знайдено");
+            return c.Id.Value;
         }
     }
 }
@@ -109,24 +109,17 @@ public static class DeleteDictionary
 {
     public record Command(string Kind, int Id) : IRequest;
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command>
+    public class Handler(Db db) : IRequestHandler<Command>
     {
         public async Task Handle(Command c, CancellationToken ct)
         {
-            object? e = c.Kind switch
-            {
-                "document-types" => await db.DocumentTypes.FindAsync([c.Id], ct),
-                "channels" => await db.Channels.FindAsync([c.Id], ct),
-                "correspondent-types" => await db.CorrespondentTypes.FindAsync([c.Id], ct),
-                _ => throw new NotFoundException($"Невідомий довідник: {c.Kind}"),
-            };
-            if (e is null) throw new NotFoundException($"Запис #{c.Id} не знайдено");
-            db.Remove(e);
+            var t = DictionaryTables.Resolve(c.Kind);
             try
             {
-                await db.SaveChangesAsync(ct);
+                var affected = await db.ExecuteAsync($"DELETE {t.Name} WHERE Id = @Id", new { c.Id }, ct);
+                if (affected == 0) throw new NotFoundException($"Запис #{c.Id} не знайдено");
             }
-            catch (DbUpdateException)
+            catch (SqlException ex) when (SqlErrors.IsReferenceViolation(ex))
             {
                 throw new ValidationException(
                     [new ValidationFailure("dictionary", "Запис використовується — видалення заборонено")]);

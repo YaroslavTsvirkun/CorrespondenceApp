@@ -1,10 +1,9 @@
 using CorrespondenceApi.Common;
-using CorrespondenceApi.Domain;
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Infrastructure.Database;
+using Dapper;
 using FluentValidation;
 using FluentValidation.Results;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace CorrespondenceApi.Features.Users;
 
@@ -56,21 +55,35 @@ public static class GetUsers
         string? OrganizationName, int? EmployeeId, string? EmployeeName, bool IsActive,
         bool IsSuperAdmin, IReadOnlyList<string> Roles);
 
-    public class Handler(AppDbContext db, ICurrentUser current) : IRequestHandler<Query, IReadOnlyList<Dto>>
+    private sealed record UserRow(int Id, string UserName, string FullName, int? OrganizationId,
+        string? OrganizationName, int? EmployeeId, string? EmployeeName, bool IsActive, bool IsSuperAdmin);
+    private sealed record UserRoleRow(int UserId, string Name);
+
+    public class Handler(Db db, ICurrentUser current) : IRequestHandler<Query, IReadOnlyList<Dto>>
     {
         public async Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct)
         {
-            var query = db.Users.IgnoreQueryFilters().AsNoTracking();
-            if (!current.Has(Permissions.OrganizationsManage))
-                query = query.Where(u => u.OrganizationId == current.OrganizationId);
+            await using var c = await db.OpenAsync(ct);
+            using var grid = await c.QueryMultipleAsync(new CommandDefinition($"""
+                SELECT u.Id, u.UserName, u.FullName, u.OrganizationId, o.Name AS OrganizationName,
+                       u.EmployeeId, e.FullName AS EmployeeName, u.IsActive,
+                       CAST(CASE WHEN u.OrganizationId IS NULL THEN 1 ELSE 0 END AS bit) AS IsSuperAdmin
+                FROM dbo.AppUser u
+                LEFT JOIN dbo.Organization o ON o.Id = u.OrganizationId
+                LEFT JOIN dbo.Employee e     ON e.Id = u.EmployeeId
+                WHERE {SqlScope.TenantFilter("u")}
+                ORDER BY u.FullName;
 
-            return await query.OrderBy(u => u.FullName)
-                .Select(u => new Dto(u.Id, u.UserName, u.FullName, u.OrganizationId,
-                    u.Organization != null ? u.Organization.Name : null,
-                    u.EmployeeId, u.Employee != null ? u.Employee.FullName : null,
-                    u.IsActive, u.OrganizationId == null,
-                    u.UserRoles.Select(ur => ur.Role.Name).ToList()))
-                .ToListAsync(ct);
+                SELECT ur.UserId, r.Name
+                FROM dbo.UserRole ur
+                JOIN dbo.Role r ON r.Id = ur.RoleId;
+                """, SqlScope.Tenant(current), cancellationToken: ct));
+
+            var users = await grid.ReadAsync<UserRow>();
+            var roles = (await grid.ReadAsync<UserRoleRow>()).ToLookup(x => x.UserId, x => x.Name);
+            return users.Select(u => new Dto(u.Id, u.UserName, u.FullName, u.OrganizationId, u.OrganizationName,
+                    u.EmployeeId, u.EmployeeName, u.IsActive, u.IsSuperAdmin, roles[u.Id].ToList()))
+                .ToList();
         }
     }
 }
@@ -85,29 +98,40 @@ public static class GetUserOptions
     public record Dto(bool IsSuperAdmin, IReadOnlyList<OrgOpt> Organizations,
         IReadOnlyList<RoleOpt> Roles, IReadOnlyList<EmpOpt> Employees);
 
-    public class Handler(AppDbContext db, ICurrentUser current) : IRequestHandler<Query, Dto>
+    public class Handler(Db db, ICurrentUser current) : IRequestHandler<Query, Dto>
     {
         public async Task<Dto> Handle(Query q, CancellationToken ct)
         {
             var isSuper = current.Has(Permissions.OrganizationsManage);
+            var p = SqlScope.Tenant(current);
+            p.Add("SuperPermission", Permissions.OrganizationsManage);
 
-            var orgsQ = db.Organizations.Where(o => o.IsActive);
-            if (!isSuper) orgsQ = orgsQ.Where(o => o.Id == current.OrganizationId);
-            var orgs = await orgsQ.OrderBy(o => o.Name)
-                .Select(o => new OrgOpt(o.Id, o.Name)).ToListAsync(ct);
+            await using var c = await db.OpenAsync(ct);
+            using var grid = await c.QueryMultipleAsync(new CommandDefinition("""
+                SELECT o.Id, o.Name
+                FROM dbo.Organization o
+                WHERE o.IsActive = 1 AND (@Bypass = 1 OR o.Id = @TenantOrganizationId)
+                ORDER BY o.Name;
 
-            // Роль вважається «супер», якщо надає право керування організаціями
-            var roles = await db.Roles.OrderBy(r => r.Name)
-                .Select(r => new RoleOpt(r.Id, r.Name,
-                    r.RolePermissions.Any(rp => rp.Permission.Code == Permissions.OrganizationsManage)))
-                .ToListAsync(ct);
-            if (!isSuper) roles = roles.Where(r => !r.IsSuper).ToList();
+                -- Роль вважається «супер», якщо надає право керування організаціями
+                SELECT r.Id, r.Name,
+                       CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.RolePermission rp
+                                              JOIN dbo.Permission pm ON pm.Id = rp.PermissionId
+                                              WHERE rp.RoleId = r.Id AND pm.Code = @SuperPermission)
+                                 THEN 1 ELSE 0 END AS bit) AS IsSuper
+                FROM dbo.Role r
+                ORDER BY r.Name;
 
-            // db.Employees вже відфільтровано тенант-фільтром (супер бачить усіх)
-            var emps = await db.Employees.OrderBy(e => e.FullName)
-                .Select(e => new EmpOpt(e.Id, e.FullName, e.Department.Name, e.OrganizationId))
-                .ToListAsync(ct);
+                SELECT e.Id, e.FullName, d.Name AS DepartmentName, e.OrganizationId
+                FROM dbo.Employee e
+                JOIN dbo.Department d ON d.Id = e.DepartmentId
+                WHERE (@Bypass = 1 OR e.OrganizationId = @TenantOrganizationId)
+                ORDER BY e.FullName;
+                """, p, cancellationToken: ct));
 
+            var orgs = (await grid.ReadAsync<OrgOpt>()).AsList();
+            var roles = (await grid.ReadAsync<RoleOpt>()).Where(r => isSuper || !r.IsSuper).ToList();
+            var emps = (await grid.ReadAsync<EmpOpt>()).AsList();
             return new Dto(isSuper, orgs, roles, emps);
         }
     }
@@ -130,12 +154,15 @@ public static class SaveUser
         }
     }
 
-    public class Handler(AppDbContext db, ICurrentUser current) : IRequestHandler<Command, int>
+    private sealed record RoleCheck(int Id, bool IsSuper);
+
+    public class Handler(Db db, ICurrentUser current) : IRequestHandler<Command, int>
     {
         public async Task<int> Handle(Command c, CancellationToken ct)
         {
             var isSuper = current.Has(Permissions.OrganizationsManage);
             var d = c.Data;
+            var roleIds = (d.RoleIds ?? []).Distinct().ToList();
 
             static ValidationException Fail(string field, string msg) =>
                 new([new ValidationFailure(field, msg)]);
@@ -146,58 +173,61 @@ public static class SaveUser
             if (!isSuper && targetOrg is null)
                 throw Fail("organization", "Вашого облікового запису не прив'язано до організації");
 
-            // Унікальність логіна
-            var nameTaken = await db.Users.IgnoreQueryFilters()
-                .AnyAsync(u => u.UserName == d.UserName && u.Id != (c.Id ?? 0), ct);
-            if (nameTaken) throw Fail("userName", "Користувач із таким логіном уже існує");
-
-            // Ролі: перевіряємо існування й заборону «супер-» ролей для не-супер-адміна
-            var roles = await db.Roles.Include(r => r.RolePermissions).ThenInclude(rp => rp.Permission)
-                .Where(r => d.RoleIds.Contains(r.Id)).ToListAsync(ct);
-            if (roles.Count != d.RoleIds.Distinct().Count())
-                throw Fail("roles", "Деяких ролей не знайдено");
-            if (!isSuper && roles.Any(r => r.RolePermissions.Any(rp => rp.Permission.Code == Permissions.OrganizationsManage)))
-                throw Fail("roles", "Недостатньо прав для призначення цієї ролі");
-
-            // Працівник: має належати цільовій організації
-            if (d.EmployeeId is int empId)
+            await using (var conn = await db.OpenAsync(ct))
             {
-                var empOrg = await db.Employees.IgnoreQueryFilters()
-                    .Where(e => e.Id == empId).Select(e => (int?)e.OrganizationId).FirstOrDefaultAsync(ct);
-                if (empOrg is null) throw Fail("employee", "Працівника не знайдено");
-                if (empOrg != targetOrg) throw Fail("employee", "Працівник належить іншій організації");
-            }
+                // Унікальність логіна
+                var nameTaken = await conn.ExecuteScalarAsync<bool>(new CommandDefinition(
+                    "SELECT CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.AppUser WHERE UserName = @UserName AND Id <> @Id) THEN 1 ELSE 0 END AS bit)",
+                    new { d.UserName, Id = c.Id ?? 0 }, cancellationToken: ct));
+                if (nameTaken) throw Fail("userName", "Користувач із таким логіном уже існує");
 
-            AppUser user;
-            if (c.Id is int id)
-            {
-                user = await db.Users.IgnoreQueryFilters().Include(u => u.UserRoles)
-                    .FirstOrDefaultAsync(u => u.Id == id, ct)
-                    ?? throw new NotFoundException($"Користувача #{id} не знайдено");
+                // Ролі: перевіряємо існування й заборону «супер-» ролей для не-супер-адміна
+                var roles = (await conn.QueryAsync<RoleCheck>(new CommandDefinition("""
+                    SELECT r.Id,
+                           CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.RolePermission rp
+                                                  JOIN dbo.Permission p ON p.Id = rp.PermissionId
+                                                  WHERE rp.RoleId = r.Id AND p.Code = @SuperPermission)
+                                     THEN 1 ELSE 0 END AS bit) AS IsSuper
+                    FROM dbo.Role r
+                    WHERE r.Id IN @roleIds
+                    """, new { roleIds, SuperPermission = Permissions.OrganizationsManage }, cancellationToken: ct))).AsList();
+                if (roles.Count != roleIds.Count)
+                    throw Fail("roles", "Деяких ролей не знайдено");
+                if (!isSuper && roles.Any(r => r.IsSuper))
+                    throw Fail("roles", "Недостатньо прав для призначення цієї ролі");
+
+                // Працівник: має належати цільовій організації
+                if (d.EmployeeId is int empId)
+                {
+                    var empOrg = await conn.QuerySingleOrDefaultAsync<int?>(new CommandDefinition(
+                        "SELECT OrganizationId FROM dbo.Employee WHERE Id = @empId", new { empId }, cancellationToken: ct));
+                    if (empOrg is null) throw Fail("employee", "Працівника не знайдено");
+                    if (empOrg != targetOrg) throw Fail("employee", "Працівник належить іншій організації");
+                }
+
                 // Адміністратор організації не може чіпати чужих/супер-адмінів
-                if (!isSuper && user.OrganizationId != current.OrganizationId)
-                    throw Fail("user", "Користувач належить іншій організації");
-                user.UserRoles.Clear();
+                if (c.Id is int id && !isSuper)
+                {
+                    var userOrg = await conn.QuerySingleOrDefaultAsync<(bool Exists, int? OrganizationId)>(
+                        new CommandDefinition("SELECT CAST(1 AS bit), OrganizationId FROM dbo.AppUser WHERE Id = @id",
+                            new { id }, cancellationToken: ct));
+                    if (!userOrg.Exists) throw new NotFoundException($"Користувача #{id} не знайдено");
+                    if (userOrg.OrganizationId != current.OrganizationId)
+                        throw Fail("user", "Користувач належить іншій організації");
+                }
             }
-            else
+
+            return await db.ScalarProcAsync<int>("dbo.usp_User_Save", new
             {
-                user = new AppUser { UserName = d.UserName };
-                db.Users.Add(user);
-            }
-
-            user.UserName = d.UserName;
-            user.FullName = d.FullName;
-            user.OrganizationId = targetOrg;
-            user.EmployeeId = d.EmployeeId;
-            user.IsActive = d.IsActive;
-            if (!string.IsNullOrEmpty(d.Password))
-                user.PasswordHash = PasswordHasher.Hash(d.Password);
-
-            foreach (var r in roles)
-                user.UserRoles.Add(new UserRole { User = user, RoleId = r.Id });
-
-            await db.SaveChangesAsync(ct);
-            return user.Id;
+                c.Id,
+                d.UserName,
+                PasswordHash = string.IsNullOrEmpty(d.Password) ? null : PasswordHasher.Hash(d.Password),
+                d.FullName,
+                OrganizationId = targetOrg,
+                d.EmployeeId,
+                d.IsActive,
+                RoleIds = string.Join(',', roleIds),
+            }, ct);
         }
     }
 }
@@ -206,23 +236,22 @@ public static class DeleteUser
 {
     public record Command(int Id) : IRequest;
 
-    public class Handler(AppDbContext db, ICurrentUser current) : IRequestHandler<Command>
+    public class Handler(Db db, ICurrentUser current) : IRequestHandler<Command>
     {
         public async Task Handle(Command c, CancellationToken ct)
         {
             if (c.Id == current.UserId)
                 throw new ValidationException([new ValidationFailure("user", "Не можна видалити власний обліковий запис")]);
 
-            var user = await db.Users.IgnoreQueryFilters()
-                .FirstOrDefaultAsync(u => u.Id == c.Id, ct)
-                ?? throw new NotFoundException($"Користувача #{c.Id} не знайдено");
+            var user = await db.QuerySingleOrDefaultAsync<(bool Exists, int? OrganizationId)>(
+                "SELECT CAST(1 AS bit), OrganizationId FROM dbo.AppUser WHERE Id = @Id", new { c.Id }, ct);
+            if (!user.Exists) throw new NotFoundException($"Користувача #{c.Id} не знайдено");
 
             var isSuper = current.Has(Permissions.OrganizationsManage);
             if (!isSuper && user.OrganizationId != current.OrganizationId)
                 throw new ValidationException([new ValidationFailure("user", "Користувач належить іншій організації")]);
 
-            db.Users.Remove(user);
-            await db.SaveChangesAsync(ct);
+            await db.ExecuteAsync("DELETE dbo.AppUser WHERE Id = @Id", new { c.Id }, ct);
         }
     }
 }

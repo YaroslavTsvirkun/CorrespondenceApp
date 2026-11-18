@@ -1,13 +1,14 @@
+using System.Data;
 using CorrespondenceApi.Common;
-using CorrespondenceApi.Domain;
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Infrastructure.Database;
+using Dapper;
 using FluentValidation;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace CorrespondenceApi.Features.Documents;
 
 // ---- Спільний вхідний DTO для створення/редагування ----
+// Імена властивостей збігаються з параметрами процедур dbo.usp_Document_Create / _Update.
 public record DocumentInput(
     int DirectionId, int DocumentTypeId, int CurrentStatusId,
     int? DeliveryChannelId, int? CorrespondentId, int? SenderDepartmentId,
@@ -98,55 +99,66 @@ public static class GetDocuments
         string DocumentType, string Title, string? Correspondent, DateOnly DocumentDate,
         string Status, bool IsControlled);
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Query, PagedResult<ListItem>>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, PagedResult<ListItem>>
     {
         public async Task<PagedResult<ListItem>> Handle(Query q, CancellationToken ct)
         {
-            var query = DocumentScope.ApplyRead(db.Documents.AsNoTracking(), user);
+            var p = SqlScope.Documents(user);
+            var where = new List<string> { SqlScope.DocumentFilter("d") };
 
             if (!string.IsNullOrWhiteSpace(q.Search))
             {
-                var s = q.Search.Trim();
-                query = query.Where(d => d.Title.Contains(s)
-                    || (d.Registration != null && d.Registration.RegistrationNumber.Contains(s)));
+                p.Add("Search", "%" + SqlText.EscapeLike(q.Search.Trim()) + "%");
+                where.Add($"(d.Title LIKE @Search ESCAPE '{SqlText.LikeEscape}' " +
+                          $"OR r.RegistrationNumber LIKE @Search ESCAPE '{SqlText.LikeEscape}')");
             }
-            if (q.DirectionId is int dir) query = query.Where(d => d.DirectionId == dir);
-            if (q.DocumentTypeId is int dt) query = query.Where(d => d.DocumentTypeId == dt);
-            if (q.StatusId is int st) query = query.Where(d => d.CurrentStatusId == st);
-            if (q.IsControlled is bool c) query = query.Where(d => d.IsControlled == c);
-            if (q.DateFrom is DateOnly from) query = query.Where(d => d.DocumentDate >= from);
-            if (q.DateTo is DateOnly to) query = query.Where(d => d.DocumentDate <= to);
+            if (q.DirectionId is int dir) { p.Add("DirectionId", dir); where.Add("d.DirectionId = @DirectionId"); }
+            if (q.DocumentTypeId is int dt) { p.Add("DocumentTypeId", dt); where.Add("d.DocumentTypeId = @DocumentTypeId"); }
+            if (q.StatusId is int st) { p.Add("StatusId", st); where.Add("d.CurrentStatusId = @StatusId"); }
+            if (q.IsControlled is bool c) { p.Add("IsControlled", c); where.Add("d.IsControlled = @IsControlled"); }
+            if (q.DateFrom is DateOnly dateFrom) { p.Add("DateFrom", dateFrom); where.Add("d.DocumentDate >= @DateFrom"); }
+            if (q.DateTo is DateOnly dateTo) { p.Add("DateTo", dateTo); where.Add("d.DocumentDate <= @DateTo"); }
 
-            var desc = q.Desc ?? true;
-            query = (q.SortBy, desc) switch
+            var direction = q.Desc ?? true ? "DESC" : "ASC";
+            var orderBy = q.SortBy switch
             {
-                ("number", true) => query.OrderByDescending(d => d.Registration!.RegistrationNumber),
-                ("number", false) => query.OrderBy(d => d.Registration!.RegistrationNumber),
-                ("title", true) => query.OrderByDescending(d => d.Title),
-                ("title", false) => query.OrderBy(d => d.Title),
-                (_, false) => query.OrderBy(d => d.DocumentDate),
-                _ => query.OrderByDescending(d => d.DocumentDate),
+                "number" => $"r.RegistrationNumber {direction}",
+                "title" => $"d.Title {direction}",
+                _ => $"d.DocumentDate {direction}",
             };
 
-            var total = await query.CountAsync(ct);
             var page = q.Page is null or < 1 ? 1 : q.Page.Value;
             var size = q.PageSize is null or < 1 or > 200 ? 10 : q.PageSize.Value;
+            p.Add("Skip", (page - 1) * size);
+            p.Add("Take", size);
 
-            var items = await query
-                .Skip((page - 1) * size).Take(size)
-                .Select(d => new ListItem(
-                    d.Id,
-                    d.Registration != null ? d.Registration.RegistrationNumber : "",
-                    d.Registration != null ? d.Registration.RegistrationYear : 0,
-                    d.Direction.Name,
-                    d.DocumentType.Name,
-                    d.Title,
-                    d.Correspondent != null ? d.Correspondent.Name : null,
-                    d.DocumentDate,
-                    d.CurrentStatus.Name,
-                    d.IsControlled))
-                .ToListAsync(ct);
+            var filter = string.Join(" AND ", where);
+            var sql = $"""
+                SELECT COUNT(*)
+                FROM dbo.Document d
+                LEFT JOIN dbo.RegistrationRecord r ON r.DocumentId = d.Id
+                WHERE {filter};
 
+                SELECT d.Id,
+                       ISNULL(r.RegistrationNumber, N'') AS RegistrationNumber,
+                       ISNULL(r.RegistrationYear, 0)     AS RegistrationYear,
+                       dir.Name AS Direction, t.Name AS DocumentType, d.Title,
+                       c.Name AS Correspondent, d.DocumentDate, s.Name AS Status, d.IsControlled
+                FROM dbo.Document d
+                LEFT JOIN dbo.RegistrationRecord r ON r.DocumentId = d.Id
+                JOIN dbo.DocumentDirection dir     ON dir.Id = d.DirectionId
+                JOIN dbo.DocumentType t            ON t.Id = d.DocumentTypeId
+                JOIN dbo.DocumentStatus s          ON s.Id = d.CurrentStatusId
+                LEFT JOIN dbo.Correspondent c      ON c.Id = d.CorrespondentId
+                WHERE {filter}
+                ORDER BY {orderBy}, d.Id {direction}
+                OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
+                """;
+
+            await using var conn = await db.OpenAsync(ct);
+            using var grid = await conn.QueryMultipleAsync(new CommandDefinition(sql, p, cancellationToken: ct));
+            var total = await grid.ReadSingleAsync<int>();
+            var items = (await grid.ReadAsync<ListItem>()).AsList();
             return new PagedResult<ListItem>(items, total, page, size);
         }
     }
@@ -167,31 +179,61 @@ public static class GetDocumentById
         string? Author, string Title, string? Summary, DateOnly DocumentDate, string? IncomingNumber,
         string? Note, IReadOnlyList<TaskItem> Tasks);
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Query, Detail>
+    private sealed record DetailRow(
+        int Id, string RegistrationNumber, int RegistrationYear, DateTime RegisteredAt,
+        string Registrar, string Direction, string DocumentType, string Status, bool IsControlled,
+        string? Channel, string? Correspondent, string? SenderDepartment, string? ReceiverDepartment,
+        string? Author, string Title, string? Summary, DateOnly DocumentDate, string? IncomingNumber,
+        string? Note);
+
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, Detail>
     {
         public async Task<Detail> Handle(Query q, CancellationToken ct)
         {
-            var d = await DocumentScope.ApplyRead(db.Documents.AsNoTracking(), user)
-                .Where(x => x.Id == q.Id)
-                .Select(x => new Detail(
-                    x.Id,
-                    x.Registration != null ? x.Registration.RegistrationNumber : "",
-                    x.Registration != null ? x.Registration.RegistrationYear : 0,
-                    x.Registration != null ? x.Registration.RegisteredAt : default,
-                    x.Registration != null ? x.Registration.RegistrarEmployee.FullName : "",
-                    x.Direction.Name, x.DocumentType.Name, x.CurrentStatus.Name, x.IsControlled,
-                    x.DeliveryChannel != null ? x.DeliveryChannel.Name : null,
-                    x.Correspondent != null ? x.Correspondent.Name : null,
-                    x.SenderDepartment != null ? x.SenderDepartment.Name : null,
-                    x.ReceiverDepartment != null ? x.ReceiverDepartment.Name : null,
-                    x.AuthorEmployee != null ? x.AuthorEmployee.FullName : null,
-                    x.Title, x.Summary, x.DocumentDate, x.IncomingNumber, x.Note,
-                    x.Tasks.Select(t => new TaskItem(
-                        t.Id, t.ExecutorEmployee.FullName, t.TaskText, t.DueDate,
-                        t.TaskStatus.Name, t.CompletedAt)).ToList()))
-                .FirstOrDefaultAsync(ct);
+            var p = SqlScope.Documents(user);
+            p.Add("Id", q.Id);
 
-            return d ?? throw new NotFoundException($"Документ #{q.Id} не знайдено");
+            var sql = $"""
+                SELECT d.Id,
+                       ISNULL(r.RegistrationNumber, N'') AS RegistrationNumber,
+                       ISNULL(r.RegistrationYear, 0) AS RegistrationYear,
+                       ISNULL(r.RegisteredAt, CAST('0001-01-01' AS datetime2)) AS RegisteredAt,
+                       ISNULL(reg.FullName, N'') AS Registrar,
+                       dir.Name AS Direction, t.Name AS DocumentType, s.Name AS Status, d.IsControlled,
+                       ch.Name AS Channel, c.Name AS Correspondent,
+                       sd.Name AS SenderDepartment, rd.Name AS ReceiverDepartment, a.FullName AS Author,
+                       d.Title, d.Summary, d.DocumentDate, d.IncomingNumber, d.Note
+                FROM dbo.Document d
+                LEFT JOIN dbo.RegistrationRecord r ON r.DocumentId = d.Id
+                LEFT JOIN dbo.Employee reg         ON reg.Id = r.RegistrarEmployeeId
+                JOIN dbo.DocumentDirection dir     ON dir.Id = d.DirectionId
+                JOIN dbo.DocumentType t            ON t.Id = d.DocumentTypeId
+                JOIN dbo.DocumentStatus s          ON s.Id = d.CurrentStatusId
+                LEFT JOIN dbo.DeliveryChannel ch   ON ch.Id = d.DeliveryChannelId
+                LEFT JOIN dbo.Correspondent c      ON c.Id = d.CorrespondentId
+                LEFT JOIN dbo.Department sd        ON sd.Id = d.SenderDepartmentId
+                LEFT JOIN dbo.Department rd        ON rd.Id = d.ReceiverDepartmentId
+                LEFT JOIN dbo.Employee a           ON a.Id = d.AuthorEmployeeId
+                WHERE d.Id = @Id AND {SqlScope.DocumentFilter("d")};
+
+                SELECT t.Id, e.FullName AS Executor, t.TaskText, t.DueDate, s.Name AS Status, t.CompletedAt
+                FROM dbo.ExecutionTask t
+                JOIN dbo.Employee e   ON e.Id = t.ExecutorEmployeeId
+                JOIN dbo.TaskStatus s ON s.Id = t.TaskStatusId
+                WHERE t.DocumentId = @Id
+                ORDER BY t.Id;
+                """;
+
+            await using var conn = await db.OpenAsync(ct);
+            using var grid = await conn.QueryMultipleAsync(new CommandDefinition(sql, p, cancellationToken: ct));
+            var d = await grid.ReadSingleOrDefaultAsync<DetailRow>()
+                ?? throw new NotFoundException($"Документ #{q.Id} не знайдено");
+            var tasks = (await grid.ReadAsync<TaskItem>()).AsList();
+
+            return new Detail(d.Id, d.RegistrationNumber, d.RegistrationYear, d.RegisteredAt, d.Registrar,
+                d.Direction, d.DocumentType, d.Status, d.IsControlled, d.Channel, d.Correspondent,
+                d.SenderDepartment, d.ReceiverDepartment, d.Author, d.Title, d.Summary, d.DocumentDate,
+                d.IncomingNumber, d.Note, tasks);
         }
     }
 }
@@ -201,21 +243,26 @@ public static class GetDocumentForEdit
 {
     public record Query(int Id) : IRequest<DocumentInput>;
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Query, DocumentInput>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, DocumentInput>
     {
         public async Task<DocumentInput> Handle(Query q, CancellationToken ct)
         {
-            var d = await DocumentScope.ApplyRead(db.Documents.AsNoTracking(), user)
-                .Where(x => x.Id == q.Id)
-                .Select(x => new DocumentInput(
-                    x.DirectionId, x.DocumentTypeId, x.CurrentStatusId,
-                    x.DeliveryChannelId, x.CorrespondentId, x.SenderDepartmentId,
-                    x.ReceiverDepartmentId, x.AuthorEmployeeId,
-                    x.Title, x.Summary, x.DocumentDate, x.IncomingNumber, x.IsControlled, x.Note,
-                    x.Registration != null ? x.Registration.RegistrationNumber : "",
-                    x.Registration != null ? x.Registration.RegistrationYear : DateTime.Now.Year,
-                    x.Registration != null ? x.Registration.RegistrarEmployeeId : 0))
-                .FirstOrDefaultAsync(ct);
+            var p = SqlScope.Documents(user);
+            p.Add("Id", q.Id);
+            p.Add("CurrentYear", DateTime.Now.Year);
+
+            var d = await db.QuerySingleOrDefaultAsync<DocumentInput>($"""
+                SELECT d.DirectionId, d.DocumentTypeId, d.CurrentStatusId,
+                       d.DeliveryChannelId, d.CorrespondentId, d.SenderDepartmentId,
+                       d.ReceiverDepartmentId, d.AuthorEmployeeId,
+                       d.Title, d.Summary, d.DocumentDate, d.IncomingNumber, d.IsControlled, d.Note,
+                       ISNULL(r.RegistrationNumber, N'')        AS RegistrationNumber,
+                       ISNULL(r.RegistrationYear, @CurrentYear) AS RegistrationYear,
+                       ISNULL(r.RegistrarEmployeeId, 0)         AS RegistrarEmployeeId
+                FROM dbo.Document d
+                LEFT JOIN dbo.RegistrationRecord r ON r.DocumentId = d.Id
+                WHERE d.Id = @Id AND {SqlScope.DocumentFilter("d")}
+                """, p, ct);
             return d ?? throw new NotFoundException($"Документ #{q.Id} не знайдено");
         }
     }
@@ -227,8 +274,7 @@ public static class GetNextNumber
     public record Query(int DirectionId, int DocumentTypeId, int Year) : IRequest<Result>;
     public record Result(string Number);
 
-    public class Handler(RegistrationNumberService numbers, ICurrentUser user)
-        : IRequestHandler<Query, Result>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, Result>
     {
         public async Task<Result> Handle(Query q, CancellationToken ct)
         {
@@ -236,13 +282,21 @@ public static class GetNextNumber
             // він буде згенерований на сервері від організації реєстратора.
             if (user.OrganizationId is not int orgId) return new Result("");
             var year = q.Year is < 1990 or > 2100 ? DateTime.Now.Year : q.Year;
-            var (number, _) = await numbers.NextAsync(orgId, q.DirectionId, q.DocumentTypeId, year, ct);
-            return new Result(number);
+
+            var p = new DynamicParameters();
+            p.Add("OrganizationId", orgId);
+            p.Add("DirectionId", q.DirectionId);
+            p.Add("DocumentTypeId", q.DocumentTypeId);
+            p.Add("Year", year);
+            p.Add("Number", dbType: DbType.String, size: 30, direction: ParameterDirection.Output);
+            p.Add("Sequence", dbType: DbType.Int32, direction: ParameterDirection.Output);
+            await db.ExecuteProcAsync("dbo.usp_RegistrationNumber_Next", p, ct);
+            return new Result(p.Get<string?>("Number") ?? "");
         }
     }
 }
 
-// ---- Слайс: створення документа (разом із реєстраційним записом) ----
+// ---- Слайс: створення документа (процедура dbo.usp_Document_Create) ----
 public static class CreateDocument
 {
     public record Command(DocumentInput Input) : IRequest<int>;
@@ -252,77 +306,20 @@ public static class CreateDocument
         public Validator() => RuleFor(x => x.Input).SetValidator(new DocumentInputValidator());
     }
 
-    public class Handler(AppDbContext db, ICurrentUser user, RegistrationNumberService numbers)
-        : IRequestHandler<Command, int>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command, int>
     {
         public async Task<int> Handle(Command c, CancellationToken ct)
         {
-            var i = c.Input;
             // Організація документа = організація поточного користувача
-            // (для супер-адміна — береться від реєстратора).
-            var organizationId = user.OrganizationId
-                ?? await db.Employees.Where(e => e.Id == i.RegistrarEmployeeId)
-                    .Select(e => (int?)e.OrganizationId).FirstOrDefaultAsync(ct)
-                ?? throw new NotFoundException("Не вдалося визначити організацію документа");
-
-            // Реєстраційний номер: ручний (якщо вказано) або автогенерація за патерном організації
-            string registrationNumber;
-            int? sequence;
-            if (!string.IsNullOrWhiteSpace(i.RegistrationNumber))
-            {
-                registrationNumber = i.RegistrationNumber.Trim();
-                sequence = null;
-                var taken = await db.Documents.IgnoreQueryFilters().AnyAsync(d =>
-                    d.OrganizationId == organizationId && d.Registration != null
-                    && d.Registration.RegistrationYear == i.RegistrationYear
-                    && d.Registration.RegistrationNumber == registrationNumber, ct);
-                if (taken)
-                    throw new ValidationException([new FluentValidation.Results.ValidationFailure(
-                        nameof(DocumentInput.RegistrationNumber),
-                        $"Реєстраційний номер «{registrationNumber}» уже використано в {i.RegistrationYear} році")]);
-            }
-            else
-            {
-                (registrationNumber, var seq) = await numbers.NextAsync(
-                    organizationId, i.DirectionId, i.DocumentTypeId, i.RegistrationYear, ct);
-                sequence = seq;
-            }
-
-            var doc = new Document
-            {
-                OrganizationId = organizationId,
-                DirectionId = i.DirectionId,
-                DocumentTypeId = i.DocumentTypeId,
-                CurrentStatusId = i.CurrentStatusId,
-                DeliveryChannelId = i.DeliveryChannelId,
-                CorrespondentId = i.CorrespondentId,
-                SenderDepartmentId = i.SenderDepartmentId,
-                ReceiverDepartmentId = i.ReceiverDepartmentId,
-                AuthorEmployeeId = i.AuthorEmployeeId,
-                Title = i.Title,
-                Summary = i.Summary,
-                DocumentDate = i.DocumentDate,
-                IncomingNumber = i.IncomingNumber,
-                IsControlled = i.IsControlled,
-                Note = i.Note,
-                Registration = new RegistrationRecord
-                {
-                    OrganizationId = organizationId,
-                    RegistrationNumber = registrationNumber,
-                    SequenceNumber = sequence,
-                    RegistrationYear = i.RegistrationYear,
-                    RegistrarEmployeeId = i.RegistrarEmployeeId,
-                    RegisteredAt = DateTime.UtcNow,
-                },
-            };
-            db.Documents.Add(doc);
-            await db.SaveChangesAsync(ct);
-            return doc.Id;
+            // (для супер-адміна процедура візьме її від реєстратора).
+            var p = new DynamicParameters(c.Input);
+            p.Add("OrganizationId", user.OrganizationId);
+            return await db.ScalarProcAsync<int>("dbo.usp_Document_Create", p, ct);
         }
     }
 }
 
-// ---- Слайс: редагування документа ----
+// ---- Слайс: редагування документа (процедура dbo.usp_Document_Update) ----
 public static class UpdateDocument
 {
     public record Command(int Id, DocumentInput Input) : IRequest;
@@ -332,38 +329,14 @@ public static class UpdateDocument
         public Validator() => RuleFor(x => x.Input).SetValidator(new DocumentInputValidator());
     }
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command>
     {
         public async Task Handle(Command c, CancellationToken ct)
         {
-            var doc = await db.Documents.Include(d => d.Registration)
-                .FirstOrDefaultAsync(d => d.Id == c.Id, ct)
-                ?? throw new NotFoundException($"Документ #{c.Id} не знайдено");
-
-            var i = c.Input;
-            doc.DirectionId = i.DirectionId;
-            doc.DocumentTypeId = i.DocumentTypeId;
-            doc.CurrentStatusId = i.CurrentStatusId;
-            doc.DeliveryChannelId = i.DeliveryChannelId;
-            doc.CorrespondentId = i.CorrespondentId;
-            doc.SenderDepartmentId = i.SenderDepartmentId;
-            doc.ReceiverDepartmentId = i.ReceiverDepartmentId;
-            doc.AuthorEmployeeId = i.AuthorEmployeeId;
-            doc.Title = i.Title;
-            doc.Summary = i.Summary;
-            doc.DocumentDate = i.DocumentDate;
-            doc.IncomingNumber = i.IncomingNumber;
-            doc.IsControlled = i.IsControlled;
-            doc.Note = i.Note;
-
-            doc.Registration ??= new RegistrationRecord();
-            doc.Registration.OrganizationId = doc.OrganizationId;
-            if (!string.IsNullOrWhiteSpace(i.RegistrationNumber))
-                doc.Registration.RegistrationNumber = i.RegistrationNumber.Trim();
-            doc.Registration.RegistrationYear = i.RegistrationYear;
-            doc.Registration.RegistrarEmployeeId = i.RegistrarEmployeeId;
-
-            await db.SaveChangesAsync(ct);
+            var p = SqlScope.Tenant(user);
+            p.AddDynamicParams(c.Input);
+            p.Add("Id", c.Id);
+            await db.ExecuteProcAsync("dbo.usp_Document_Update", p, ct);
         }
     }
 }
@@ -373,14 +346,13 @@ public static class DeleteDocument
 {
     public record Command(int Id) : IRequest;
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command>
     {
         public async Task Handle(Command c, CancellationToken ct)
         {
-            var doc = await db.Documents.FirstOrDefaultAsync(d => d.Id == c.Id, ct)
-                ?? throw new NotFoundException($"Документ #{c.Id} не знайдено");
-            db.Documents.Remove(doc);
-            await db.SaveChangesAsync(ct);
+            var p = SqlScope.Tenant(user);
+            p.Add("Id", c.Id);
+            await db.ExecuteProcAsync("dbo.usp_Document_Delete", p, ct);
         }
     }
 }
