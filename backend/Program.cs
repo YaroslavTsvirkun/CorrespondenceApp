@@ -13,12 +13,11 @@ using CorrespondenceApi.Features.Reports;
 using CorrespondenceApi.Features.Settings;
 using CorrespondenceApi.Features.Tasks;
 using CorrespondenceApi.Features.Users;
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Infrastructure.Database;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -26,9 +25,13 @@ var builder = WebApplication.CreateBuilder(args);
 // .NET Aspire: телеметрія, health checks, service discovery, стійкість HTTP
 builder.AddServiceDefaults();
 
-var connectionString = builder.Configuration.GetConnectionString("Default")
-    ?? @"Server=(localdb)\MSSQLLocalDB;Database=CorrespondenceApiDb;Trusted_Connection=True;TrustServerCertificate=True";
-builder.Services.AddDbContext<AppDbContext>(o => o.UseSqlServer(connectionString));
+// ---- Доступ до даних: Dapper + SQL-код (функції, процедури, тригери) у БД ----
+var dbOptions = builder.Configuration.GetSection("Database").Get<DatabaseOptions>() ?? new DatabaseOptions();
+dbOptions.ConnectionString = builder.Configuration.GetConnectionString("Default") ?? dbOptions.ConnectionString;
+builder.Services.AddSingleton(dbOptions);
+builder.Services.AddSingleton<SqlScriptDeployer>();
+builder.Services.AddScoped<Db>();
+DapperConfig.Configure();
 
 builder.Services.AddMediatR(cfg =>
 {
@@ -44,7 +47,6 @@ builder.Services.AddProblemDetails();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddScoped<TokenService>();
-builder.Services.AddScoped<RegistrationNumberService>();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
 builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
 // Динамічні права: пермішени вантажаться з БД на кожен запит
@@ -105,11 +107,11 @@ ReportsEndpoints.MapReports(app);
 
 app.MapGet("/", () => Results.Redirect("/swagger")).AllowAnonymous();
 
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.MigrateAsync();
-    await DbSeeder.SeedAsync(db);
-}
+// Автоматичне розгортання SQL-коду з директорії Database/ (схема, функції, процедури, тригери, дані).
+// `dotnet run -- --deploy-db` — лише розгорнути БД і завершити роботу.
+var deployOnly = args.Contains("--deploy-db");
+if (dbOptions.DeployOnStartup || deployOnly)
+    await app.Services.GetRequiredService<SqlScriptDeployer>().DeployAsync();
+if (deployOnly) return;
 
 app.Run();

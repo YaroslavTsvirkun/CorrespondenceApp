@@ -1,9 +1,7 @@
 using CorrespondenceApi.Common;
-using CorrespondenceApi.Domain;
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Infrastructure.Database;
 using FluentValidation;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace CorrespondenceApi.Features.Tasks;
 
@@ -46,25 +44,24 @@ public static class GetTasks
         int ExecutorEmployeeId, string ExecutorName, int StatusId, string StatusName,
         string TaskText, string ResolutionText, DateOnly DueDate, DateTime? CompletedAt, string? ResultText);
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Dto>>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Dto>>
     {
-        public async Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct)
-        {
-            var scopedIds = DocumentScope.ApplyRead(db.Documents, user).Select(d => d.Id);
-            return await db.Tasks.AsNoTracking()
-                .Where(t => scopedIds.Contains(t.DocumentId))
-                .OrderByDescending(t => t.DueDate)
-                .Select(t => new Dto(
-                    t.Id, t.DocumentId,
-                    t.Document.Registration != null
-                        ? t.Document.Registration.RegistrationNumber + "/" + t.Document.Registration.RegistrationYear
-                        : "—",
-                    t.Document.Title,
-                    t.ExecutorEmployeeId, t.ExecutorEmployee.FullName,
-                    t.TaskStatusId, t.TaskStatus.Name,
-                    t.TaskText, t.Resolution.ResolutionText, t.DueDate, t.CompletedAt, t.ResultText))
-                .ToListAsync(ct);
-        }
+        public Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
+            db.QueryAsync<Dto>($"""
+                SELECT t.Id, t.DocumentId,
+                       dbo.fn_DocumentDisplayNumber(t.DocumentId) AS DocumentNumber,
+                       d.Title AS DocumentTitle,
+                       t.ExecutorEmployeeId, e.FullName AS ExecutorName,
+                       t.TaskStatusId AS StatusId, s.Name AS StatusName,
+                       t.TaskText, r.ResolutionText, t.DueDate, t.CompletedAt, t.ResultText
+                FROM dbo.ExecutionTask t
+                JOIN dbo.Document d   ON d.Id = t.DocumentId
+                JOIN dbo.Employee e   ON e.Id = t.ExecutorEmployeeId
+                JOIN dbo.TaskStatus s ON s.Id = t.TaskStatusId
+                JOIN dbo.Resolution r ON r.Id = t.ResolutionId
+                WHERE {SqlScope.DocumentFilter("d")}
+                ORDER BY t.DueDate DESC, t.Id DESC
+                """, SqlScope.Documents(user), ct);
     }
 }
 
@@ -80,6 +77,7 @@ public class TaskInputValidator : AbstractValidator<TaskInput>
     }
 }
 
+// Створення доручення: процедура dbo.usp_Task_Create (резолюція + доручення в одній транзакції)
 public static class CreateTask
 {
     public record Command(TaskInput Input) : IRequest<int>;
@@ -89,36 +87,25 @@ public static class CreateTask
         public Validator() => RuleFor(x => x.Input).SetValidator(new TaskInputValidator());
     }
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Command, int>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command, int>
     {
-        public async Task<int> Handle(Command c, CancellationToken ct)
+        public Task<int> Handle(Command c, CancellationToken ct)
         {
             var i = c.Input;
-            // Доручення завжди належить резолюції — створюємо її автоматично.
-            var resolution = new Resolution
+            var p = SqlScope.Tenant(user);
+            p.AddDynamicParams(new
             {
-                DocumentId = i.DocumentId,
-                AuthorEmployeeId = user.EmployeeId ?? i.ExecutorEmployeeId,
-                ResolutionText = i.ResolutionText,
-                ResolutionDate = DateOnly.FromDateTime(DateTime.Today),
-                DueDate = i.DueDate,
-                IsControlled = true,
-            };
-            var task = new ExecutionTask
-            {
-                Resolution = resolution,
-                DocumentId = i.DocumentId,
-                ExecutorEmployeeId = i.ExecutorEmployeeId,
+                i.DocumentId,
+                i.ResolutionText,
+                AuthorEmployeeId = user.EmployeeId,
+                i.ExecutorEmployeeId,
                 TaskStatusId = i.StatusId,
-                TaskText = i.TaskText,
-                AssignedAt = DateTime.UtcNow,
-                DueDate = i.DueDate,
+                i.TaskText,
+                i.DueDate,
                 CompletedAt = i.CompletedAt?.ToDateTime(TimeOnly.MinValue),
-                ResultText = i.ResultText,
-            };
-            db.Tasks.Add(task);
-            await db.SaveChangesAsync(ct);
-            return task.Id;
+                i.ResultText,
+            });
+            return db.ScalarProcAsync<int>("dbo.usp_Task_Create", p, ct);
         }
     }
 }
@@ -132,22 +119,24 @@ public static class UpdateTask
         public Validator() => RuleFor(x => x.Input).SetValidator(new TaskInputValidator());
     }
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command>
     {
-        public async Task Handle(Command c, CancellationToken ct)
+        public Task Handle(Command c, CancellationToken ct)
         {
-            var task = await db.Tasks.Include(t => t.Resolution)
-                .FirstOrDefaultAsync(t => t.Id == c.Id, ct)
-                ?? throw new NotFoundException($"Доручення #{c.Id} не знайдено");
             var i = c.Input;
-            task.ExecutorEmployeeId = i.ExecutorEmployeeId;
-            task.TaskStatusId = i.StatusId;
-            task.TaskText = i.TaskText;
-            task.DueDate = i.DueDate;
-            task.CompletedAt = i.CompletedAt?.ToDateTime(TimeOnly.MinValue);
-            task.ResultText = i.ResultText;
-            task.Resolution.ResolutionText = i.ResolutionText;
-            await db.SaveChangesAsync(ct);
+            var p = SqlScope.Tenant(user);
+            p.AddDynamicParams(new
+            {
+                c.Id,
+                i.ResolutionText,
+                i.ExecutorEmployeeId,
+                TaskStatusId = i.StatusId,
+                i.TaskText,
+                i.DueDate,
+                CompletedAt = i.CompletedAt?.ToDateTime(TimeOnly.MinValue),
+                i.ResultText,
+            });
+            return db.ExecuteProcAsync("dbo.usp_Task_Update", p, ct);
         }
     }
 }
@@ -156,14 +145,13 @@ public static class DeleteTask
 {
     public record Command(int Id) : IRequest;
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command>
     {
-        public async Task Handle(Command c, CancellationToken ct)
+        public Task Handle(Command c, CancellationToken ct)
         {
-            var task = await db.Tasks.FindAsync([c.Id], ct)
-                ?? throw new NotFoundException($"Доручення #{c.Id} не знайдено");
-            db.Tasks.Remove(task);
-            await db.SaveChangesAsync(ct);
+            var p = SqlScope.Tenant(user);
+            p.Add("Id", c.Id);
+            return db.ExecuteProcAsync("dbo.usp_Task_Delete", p, ct);
         }
     }
 }

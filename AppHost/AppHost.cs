@@ -1,6 +1,7 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
-// Бекенд (ASP.NET Core API). Працює з MS SQL Server LocalDB через рядок підключення.
+// Бекенд (ASP.NET Core API, Dapper). Працює з MS SQL Server LocalDB через рядок підключення;
+// під час старту сам розгортає SQL-код із backend/Database (схема, функції, процедури, тригери, дані).
 var backend = builder.AddProject<Projects.CorrespondenceApi>("backend")
     .WithHttpHealthCheck("/health")
     .WithExternalHttpEndpoints();

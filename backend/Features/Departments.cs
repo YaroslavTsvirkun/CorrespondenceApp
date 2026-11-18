@@ -1,10 +1,8 @@
 using CorrespondenceApi.Common;
-using CorrespondenceApi.Domain;
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Infrastructure.Database;
 using FluentValidation;
 using FluentValidation.Results;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace CorrespondenceApi.Features.Departments;
 
@@ -46,13 +44,18 @@ public static class GetDepartments
     public record Dto(int Id, string Name, string? ShortName, string? Description, bool IsActive,
         int OrganizationId, string OrganizationName, int? ParentDepartmentId, int EmployeeCount);
 
-    public class Handler(AppDbContext db) : IRequestHandler<Query, IReadOnlyList<Dto>>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Dto>>
     {
-        public async Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
-            await db.Departments.OrderBy(d => d.Name)
-                .Select(d => new Dto(d.Id, d.Name, d.ShortName, d.Description, d.IsActive,
-                    d.OrganizationId, d.Organization.Name, d.ParentDepartmentId, d.Employees.Count))
-                .ToListAsync(ct);
+        public Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
+            db.QueryAsync<Dto>($"""
+                SELECT d.Id, d.Name, d.ShortName, d.Description, d.IsActive,
+                       d.OrganizationId, o.Name AS OrganizationName, d.ParentDepartmentId,
+                       (SELECT COUNT(*) FROM dbo.Employee e WHERE e.DepartmentId = d.Id) AS EmployeeCount
+                FROM dbo.Department d
+                JOIN dbo.Organization o ON o.Id = d.OrganizationId
+                WHERE {SqlScope.TenantFilter("d")}
+                ORDER BY d.Name
+                """, SqlScope.Tenant(user), ct);
     }
 }
 
@@ -65,44 +68,60 @@ public static class SaveDepartment
         public Validator() => RuleFor(x => x.Data.Name).NotEmpty().MaximumLength(150);
     }
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Command, int>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command, int>
     {
         public async Task<int> Handle(Command c, CancellationToken ct)
         {
-            var e = c.Id is int id
-                ? await db.Departments.FindAsync([id], ct) ?? throw new NotFoundException($"Підрозділ #{id} не знайдено")
-                : new Department();
+            var d = c.Data;
+            var p = SqlScope.Tenant(user);
+            p.AddDynamicParams(new
+            {
+                c.Id,
+                d.Name,
+                d.ShortName,
+                d.Description,
+                d.IsActive,
+                // Підрозділ не може бути батьківським сам для себе
+                ParentDepartmentId = c.Id is not null && d.ParentDepartmentId == c.Id ? null : d.ParentDepartmentId,
+            });
+
             if (c.Id is null)
-                e.OrganizationId = user.OrganizationId ?? c.Data.OrganizationId
+            {
+                var orgId = user.OrganizationId ?? d.OrganizationId
                     ?? throw new ValidationException([new ValidationFailure("organization", "Оберіть організацію")]);
-            e.Name = c.Data.Name;
-            e.ShortName = c.Data.ShortName;
-            e.Description = c.Data.Description;
-            e.IsActive = c.Data.IsActive;
-            e.ParentDepartmentId = c.Data.ParentDepartmentId == e.Id ? null : c.Data.ParentDepartmentId;
-            if (c.Id is null) db.Departments.Add(e);
-            await db.SaveChangesAsync(ct);
-            return e.Id;
+                p.Add("OrganizationId", orgId);
+                return await db.ScalarAsync<int>("""
+                    INSERT dbo.Department (OrganizationId, Name, ShortName, Description, IsActive, ParentDepartmentId)
+                    VALUES (@OrganizationId, @Name, @ShortName, @Description, @IsActive, @ParentDepartmentId);
+                    SELECT CAST(SCOPE_IDENTITY() AS int);
+                    """, p, ct);
+            }
+
+            var affected = await db.ExecuteAsync($"""
+                UPDATE d
+                SET Name = @Name, ShortName = @ShortName, Description = @Description,
+                    IsActive = @IsActive, ParentDepartmentId = @ParentDepartmentId
+                FROM dbo.Department d
+                WHERE d.Id = @Id AND {SqlScope.TenantFilter("d")}
+                """, p, ct);
+            if (affected == 0) throw new NotFoundException($"Підрозділ #{c.Id} не знайдено");
+            return c.Id.Value;
         }
     }
 }
 
+// Видалення: процедура dbo.usp_Department_Delete перевіряє наявність працівників і дочірніх підрозділів
 public static class DeleteDepartment
 {
     public record Command(int Id) : IRequest;
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command>
     {
-        public async Task Handle(Command c, CancellationToken ct)
+        public Task Handle(Command c, CancellationToken ct)
         {
-            var e = await db.Departments.Include(d => d.Employees).Include(d => d.Children)
-                .FirstOrDefaultAsync(d => d.Id == c.Id, ct)
-                ?? throw new NotFoundException($"Підрозділ #{c.Id} не знайдено");
-            if (e.Employees.Count > 0 || e.Children.Count > 0)
-                throw new ValidationException([new ValidationFailure("department",
-                    "У підрозділі є працівники або підпорядковані підрозділи — видалення заборонено")]);
-            db.Departments.Remove(e);
-            await db.SaveChangesAsync(ct);
+            var p = SqlScope.Tenant(user);
+            p.Add("Id", c.Id);
+            return db.ExecuteProcAsync("dbo.usp_Department_Delete", p, ct);
         }
     }
 }

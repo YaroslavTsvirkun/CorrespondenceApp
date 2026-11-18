@@ -1,10 +1,9 @@
 using CorrespondenceApi.Common;
-using CorrespondenceApi.Domain;
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Infrastructure.Database;
 using FluentValidation;
 using FluentValidation.Results;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.Data.SqlClient;
 
 namespace CorrespondenceApi.Features.Employees;
 
@@ -46,13 +45,17 @@ public static class GetEmployees
     public record Dto(int Id, string FullName, string PositionName, int DepartmentId,
         string DepartmentName, string? Phone, string? Email, bool IsActive);
 
-    public class Handler(AppDbContext db) : IRequestHandler<Query, IReadOnlyList<Dto>>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Dto>>
     {
-        public async Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
-            await db.Employees.OrderBy(e => e.FullName)
-                .Select(e => new Dto(e.Id, e.FullName, e.PositionName, e.DepartmentId,
-                    e.Department.Name, e.Phone, e.Email, e.IsActive))
-                .ToListAsync(ct);
+        public Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
+            db.QueryAsync<Dto>($"""
+                SELECT e.Id, e.FullName, e.PositionName, e.DepartmentId, d.Name AS DepartmentName,
+                       e.Phone, e.Email, e.IsActive
+                FROM dbo.Employee e
+                JOIN dbo.Department d ON d.Id = e.DepartmentId
+                WHERE {SqlScope.TenantFilter("e")}
+                ORDER BY e.FullName
+                """, SqlScope.Tenant(user), ct);
     }
 }
 
@@ -70,26 +73,38 @@ public static class SaveEmployee
         }
     }
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command, int>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command, int>
     {
         public async Task<int> Handle(Command c, CancellationToken ct)
         {
-            var e = c.Id is int id
-                ? await db.Employees.FindAsync([id], ct) ?? throw new NotFoundException($"Працівника #{id} не знайдено")
-                : new Employee();
-            e.DepartmentId = c.Data.DepartmentId;
+            var p = SqlScope.Tenant(user);
+            p.AddDynamicParams(c.Data);
+            p.Add("Id", c.Id);
+
+            // Організація працівника = організація підрозділу (підрозділ має бути видимий користувачу)
+            var departmentOrg = await db.QuerySingleOrDefaultAsync<int?>($"""
+                SELECT d.OrganizationId FROM dbo.Department d
+                WHERE d.Id = @DepartmentId AND {SqlScope.TenantFilter("d")}
+                """, p, ct)
+                ?? throw new ValidationException([new ValidationFailure("department", "Підрозділ не знайдено")]);
+            p.Add("OrganizationId", departmentOrg);
+
             if (c.Id is null)
-                e.OrganizationId = await db.Departments.Where(d => d.Id == c.Data.DepartmentId)
-                    .Select(d => (int?)d.OrganizationId).FirstOrDefaultAsync(ct)
-                    ?? throw new ValidationException([new ValidationFailure("department", "Підрозділ не знайдено")]);
-            e.FullName = c.Data.FullName;
-            e.PositionName = c.Data.PositionName;
-            e.Phone = c.Data.Phone;
-            e.Email = c.Data.Email;
-            e.IsActive = c.Data.IsActive;
-            if (c.Id is null) db.Employees.Add(e);
-            await db.SaveChangesAsync(ct);
-            return e.Id;
+                return await db.ScalarAsync<int>("""
+                    INSERT dbo.Employee (OrganizationId, DepartmentId, FullName, PositionName, Phone, Email, IsActive)
+                    VALUES (@OrganizationId, @DepartmentId, @FullName, @PositionName, @Phone, @Email, @IsActive);
+                    SELECT CAST(SCOPE_IDENTITY() AS int);
+                    """, p, ct);
+
+            var affected = await db.ExecuteAsync($"""
+                UPDATE e
+                SET DepartmentId = @DepartmentId, FullName = @FullName, PositionName = @PositionName,
+                    Phone = @Phone, Email = @Email, IsActive = @IsActive
+                FROM dbo.Employee e
+                WHERE e.Id = @Id AND {SqlScope.TenantFilter("e")}
+                """, p, ct);
+            if (affected == 0) throw new NotFoundException($"Працівника #{c.Id} не знайдено");
+            return c.Id.Value;
         }
     }
 }
@@ -98,18 +113,19 @@ public static class DeleteEmployee
 {
     public record Command(int Id) : IRequest;
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command>
     {
         public async Task Handle(Command c, CancellationToken ct)
         {
-            var e = await db.Employees.FindAsync([c.Id], ct)
-                ?? throw new NotFoundException($"Працівника #{c.Id} не знайдено");
-            db.Employees.Remove(e);
+            var p = SqlScope.Tenant(user);
+            p.Add("Id", c.Id);
             try
             {
-                await db.SaveChangesAsync(ct);
+                var affected = await db.ExecuteAsync(
+                    $"DELETE e FROM dbo.Employee e WHERE e.Id = @Id AND {SqlScope.TenantFilter("e")}", p, ct);
+                if (affected == 0) throw new NotFoundException($"Працівника #{c.Id} не знайдено");
             }
-            catch (DbUpdateException)
+            catch (SqlException ex) when (SqlErrors.IsReferenceViolation(ex))
             {
                 throw new ValidationException(
                     [new ValidationFailure("employee", "Працівник використовується в документах/дорученнях — видалення заборонено")]);

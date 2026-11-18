@@ -1,10 +1,7 @@
 using CorrespondenceApi.Common;
-using CorrespondenceApi.Domain;
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Infrastructure.Database;
 using FluentValidation;
-using FluentValidation.Results;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace CorrespondenceApi.Features.Organizations;
 
@@ -46,13 +43,16 @@ public static class GetOrganizations
     public record Dto(int Id, string Name, string? Code, int? ParentOrganizationId, bool IsActive,
         string RegistrationNumberPattern, int DepartmentCount, int UserCount);
 
-    public class Handler(AppDbContext db) : IRequestHandler<Query, IReadOnlyList<Dto>>
+    public class Handler(Db db) : IRequestHandler<Query, IReadOnlyList<Dto>>
     {
-        public async Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
-            await db.Organizations.IgnoreQueryFilters().OrderBy(o => o.Name)
-                .Select(o => new Dto(o.Id, o.Name, o.Code, o.ParentOrganizationId, o.IsActive,
-                    o.RegistrationNumberPattern, o.Departments.Count, o.Users.Count))
-                .ToListAsync(ct);
+        public Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
+            db.QueryAsync<Dto>("""
+                SELECT o.Id, o.Name, o.Code, o.ParentOrganizationId, o.IsActive, o.RegistrationNumberPattern,
+                       (SELECT COUNT(*) FROM dbo.Department d WHERE d.OrganizationId = o.Id) AS DepartmentCount,
+                       (SELECT COUNT(*) FROM dbo.AppUser u WHERE u.OrganizationId = o.Id) AS UserCount
+                FROM dbo.Organization o
+                ORDER BY o.Name
+                """, null, ct);
     }
 }
 
@@ -65,43 +65,50 @@ public static class SaveOrganization
         public Validator() => RuleFor(x => x.Data.Name).NotEmpty().MaximumLength(200);
     }
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command, int>
+    public class Handler(Db db) : IRequestHandler<Command, int>
     {
         public async Task<int> Handle(Command c, CancellationToken ct)
         {
-            var e = c.Id is int id
-                ? await db.Organizations.FindAsync([id], ct) ?? throw new NotFoundException($"Організацію #{id} не знайдено")
-                : new Organization();
-            e.Name = c.Data.Name;
-            e.Code = c.Data.Code;
-            e.IsActive = c.Data.IsActive;
-            e.ParentOrganizationId = c.Data.ParentOrganizationId == e.Id ? null : c.Data.ParentOrganizationId;
-            if (!string.IsNullOrWhiteSpace(c.Data.RegistrationNumberPattern))
-                e.RegistrationNumberPattern = c.Data.RegistrationNumberPattern.Trim();
-            if (c.Id is null) db.Organizations.Add(e);
-            await db.SaveChangesAsync(ct);
-            return e.Id;
+            var d = c.Data;
+            var param = new
+            {
+                c.Id,
+                d.Name,
+                d.Code,
+                d.IsActive,
+                // Організація не може бути батьківською сама для себе
+                ParentOrganizationId = c.Id is not null && d.ParentOrganizationId == c.Id ? null : d.ParentOrganizationId,
+                Pattern = string.IsNullOrWhiteSpace(d.RegistrationNumberPattern) ? null : d.RegistrationNumberPattern.Trim(),
+            };
+
+            if (c.Id is null)
+                return await db.ScalarAsync<int>("""
+                    INSERT dbo.Organization (Name, Code, IsActive, ParentOrganizationId, RegistrationNumberPattern)
+                    VALUES (@Name, @Code, @IsActive, @ParentOrganizationId, ISNULL(@Pattern, N'{type}-{seq:000}/{year}'));
+                    SELECT CAST(SCOPE_IDENTITY() AS int);
+                    """, param, ct);
+
+            var affected = await db.ExecuteAsync("""
+                UPDATE dbo.Organization
+                SET Name = @Name, Code = @Code, IsActive = @IsActive,
+                    ParentOrganizationId = @ParentOrganizationId,
+                    RegistrationNumberPattern = ISNULL(@Pattern, RegistrationNumberPattern)
+                WHERE Id = @Id
+                """, param, ct);
+            if (affected == 0) throw new NotFoundException($"Організацію #{c.Id} не знайдено");
+            return c.Id.Value;
         }
     }
 }
 
+// Видалення: процедура dbo.usp_Organization_Delete перевіряє залежності
 public static class DeleteOrganization
 {
     public record Command(int Id) : IRequest;
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command>
+    public class Handler(Db db) : IRequestHandler<Command>
     {
-        public async Task Handle(Command c, CancellationToken ct)
-        {
-            var e = await db.Organizations.IgnoreQueryFilters()
-                .Include(o => o.Children).Include(o => o.Departments).Include(o => o.Users)
-                .FirstOrDefaultAsync(o => o.Id == c.Id, ct)
-                ?? throw new NotFoundException($"Організацію #{c.Id} не знайдено");
-            if (e.Children.Count > 0 || e.Departments.Count > 0 || e.Users.Count > 0)
-                throw new ValidationException([new ValidationFailure("organization",
-                    "Організація має підрозділи, користувачів або дочірні організації — видалення заборонено")]);
-            db.Organizations.Remove(e);
-            await db.SaveChangesAsync(ct);
-        }
+        public Task Handle(Command c, CancellationToken ct) =>
+            db.ExecuteProcAsync("dbo.usp_Organization_Delete", new { c.Id }, ct);
     }
 }

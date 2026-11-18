@@ -1,10 +1,8 @@
 using CorrespondenceApi.Common;
-using CorrespondenceApi.Domain;
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Infrastructure.Database;
 using FluentValidation;
 using FluentValidation.Results;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace CorrespondenceApi.Features.Correspondents;
 
@@ -46,13 +44,17 @@ public static class GetCorrespondents
     public record Dto(int Id, string Name, int CorrespondentTypeId, string TypeName,
         string? Address, string? Phone, string? Email, string? ContactPerson, string? Note);
 
-    public class Handler(AppDbContext db) : IRequestHandler<Query, IReadOnlyList<Dto>>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Dto>>
     {
-        public async Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
-            await db.Correspondents.OrderBy(c => c.Name)
-                .Select(c => new Dto(c.Id, c.Name, c.CorrespondentTypeId, c.CorrespondentType.Name,
-                    c.Address, c.Phone, c.Email, c.ContactPerson, c.Note))
-                .ToListAsync(ct);
+        public Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
+            db.QueryAsync<Dto>($"""
+                SELECT c.Id, c.Name, c.CorrespondentTypeId, t.Name AS TypeName,
+                       c.Address, c.Phone, c.Email, c.ContactPerson, c.Note
+                FROM dbo.Correspondent c
+                JOIN dbo.CorrespondentType t ON t.Id = c.CorrespondentTypeId
+                WHERE {SqlScope.TenantFilter("c")}
+                ORDER BY c.Name
+                """, SqlScope.Tenant(user), ct);
     }
 }
 
@@ -69,26 +71,35 @@ public static class SaveCorrespondent
         }
     }
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Command, int>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command, int>
     {
         public async Task<int> Handle(Command c, CancellationToken ct)
         {
-            var e = c.Id is int id
-                ? await db.Correspondents.FindAsync([id], ct) ?? throw new NotFoundException($"Кореспондента #{id} не знайдено")
-                : new Correspondent();
+            var p = SqlScope.Tenant(user);
+            p.AddDynamicParams(c.Data);
+            p.Add("Id", c.Id);
+
             if (c.Id is null)
-                e.OrganizationId = user.OrganizationId
+            {
+                var orgId = user.OrganizationId
                     ?? throw new ValidationException([new ValidationFailure("organization", "Створення доступне лише в межах організації")]);
-            e.CorrespondentTypeId = c.Data.CorrespondentTypeId;
-            e.Name = c.Data.Name;
-            e.Address = c.Data.Address;
-            e.Phone = c.Data.Phone;
-            e.Email = c.Data.Email;
-            e.ContactPerson = c.Data.ContactPerson;
-            e.Note = c.Data.Note;
-            if (c.Id is null) db.Correspondents.Add(e);
-            await db.SaveChangesAsync(ct);
-            return e.Id;
+                p.Add("OrganizationId", orgId);
+                return await db.ScalarAsync<int>("""
+                    INSERT dbo.Correspondent (OrganizationId, CorrespondentTypeId, Name, Address, Phone, Email, ContactPerson, Note)
+                    VALUES (@OrganizationId, @CorrespondentTypeId, @Name, @Address, @Phone, @Email, @ContactPerson, @Note);
+                    SELECT CAST(SCOPE_IDENTITY() AS int);
+                    """, p, ct);
+            }
+
+            var affected = await db.ExecuteAsync($"""
+                UPDATE c
+                SET CorrespondentTypeId = @CorrespondentTypeId, Name = @Name, Address = @Address,
+                    Phone = @Phone, Email = @Email, ContactPerson = @ContactPerson, Note = @Note
+                FROM dbo.Correspondent c
+                WHERE c.Id = @Id AND {SqlScope.TenantFilter("c")}
+                """, p, ct);
+            if (affected == 0) throw new NotFoundException($"Кореспондента #{c.Id} не знайдено");
+            return c.Id.Value;
         }
     }
 }
@@ -97,14 +108,16 @@ public static class DeleteCorrespondent
 {
     public record Command(int Id) : IRequest;
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command>
     {
         public async Task Handle(Command c, CancellationToken ct)
         {
-            var e = await db.Correspondents.FindAsync([c.Id], ct)
-                ?? throw new NotFoundException($"Кореспондента #{c.Id} не знайдено");
-            db.Correspondents.Remove(e); // у документах посилання обнуляться (SET NULL)
-            await db.SaveChangesAsync(ct);
+            var p = SqlScope.Tenant(user);
+            p.Add("Id", c.Id);
+            // у документах посилання обнуляться (FK ON DELETE SET NULL)
+            var affected = await db.ExecuteAsync(
+                $"DELETE c FROM dbo.Correspondent c WHERE c.Id = @Id AND {SqlScope.TenantFilter("c")}", p, ct);
+            if (affected == 0) throw new NotFoundException($"Кореспондента #{c.Id} не знайдено");
         }
     }
 }

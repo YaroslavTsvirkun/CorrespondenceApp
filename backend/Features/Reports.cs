@@ -1,10 +1,11 @@
 using CorrespondenceApi.Common;
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Infrastructure.Database;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace CorrespondenceApi.Features.Reports;
 
+// Звіти будуються збереженими процедурами dbo.usp_Report_* з урахуванням
+// тенант-ізоляції та зони видимості документів поточного користувача.
 public static class ReportsEndpoints
 {
     public static void MapReports(IEndpointRouteBuilder app)
@@ -24,17 +25,10 @@ public static class DocumentsByType
     public record Query : IRequest<IReadOnlyList<Row>>;
     public record Row(string Type, int Count);
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Row>>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Row>>
     {
-        public async Task<IReadOnlyList<Row>> Handle(Query q, CancellationToken ct)
-        {
-            var rows = await DocumentScope.ApplyRead(db.Documents, user)
-                .GroupBy(d => d.DocumentType.Name)
-                .Select(g => new { Type = g.Key, Count = g.Count() })
-                .ToListAsync(ct);
-            return rows.OrderByDescending(r => r.Count)
-                .Select(r => new Row(r.Type, r.Count)).ToList();
-        }
+        public Task<IReadOnlyList<Row>> Handle(Query q, CancellationToken ct) =>
+            db.QueryProcAsync<Row>("dbo.usp_Report_DocumentsByType", SqlScope.Documents(user), ct);
     }
 }
 
@@ -44,21 +38,10 @@ public static class DocumentsByDirection
     public record Query : IRequest<IReadOnlyList<Row>>;
     public record Row(string Direction, int Count, int Percent);
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Row>>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Row>>
     {
-        public async Task<IReadOnlyList<Row>> Handle(Query q, CancellationToken ct)
-        {
-            var scoped = DocumentScope.ApplyRead(db.Documents, user);
-            var total = await scoped.CountAsync(ct);
-            var grouped = await scoped
-                .GroupBy(d => d.Direction.Name)
-                .Select(g => new { g.Key, Count = g.Count() })
-                .ToListAsync(ct);
-            return grouped
-                .Select(x => new Row(x.Key, x.Count, total == 0 ? 0 : x.Count * 100 / total))
-                .OrderByDescending(r => r.Count)
-                .ToList();
-        }
+        public Task<IReadOnlyList<Row>> Handle(Query q, CancellationToken ct) =>
+            db.QueryProcAsync<Row>("dbo.usp_Report_DocumentsByDirection", SqlScope.Documents(user), ct);
     }
 }
 
@@ -68,26 +51,10 @@ public static class ExecutorDiscipline
     public record Query : IRequest<IReadOnlyList<Row>>;
     public record Row(string Executor, int Total, int Done, int Percent);
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Row>>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Row>>
     {
-        public async Task<IReadOnlyList<Row>> Handle(Query q, CancellationToken ct)
-        {
-            var scopedIds = DocumentScope.ApplyRead(db.Documents, user).Select(d => d.Id);
-            var data = await db.Tasks
-                .Where(t => scopedIds.Contains(t.DocumentId))
-                .Select(t => new { Name = t.ExecutorEmployee.FullName, Done = t.TaskStatus.Name == "Виконано" })
-                .ToListAsync(ct);
-            return data
-                .GroupBy(x => x.Name)
-                .Select(g =>
-                {
-                    var total = g.Count();
-                    var done = g.Count(x => x.Done);
-                    return new Row(g.Key, total, done, total == 0 ? 0 : done * 100 / total);
-                })
-                .OrderByDescending(r => r.Total)
-                .ToList();
-        }
+        public Task<IReadOnlyList<Row>> Handle(Query q, CancellationToken ct) =>
+            db.QueryProcAsync<Row>("dbo.usp_Report_ExecutorDiscipline", SqlScope.Documents(user), ct);
     }
 }
 
@@ -97,28 +64,9 @@ public static class OverdueTasks
     public record Query : IRequest<IReadOnlyList<Row>>;
     public record Row(int TaskId, string Document, string Executor, DateOnly DueDate, int DaysOverdue);
 
-    public class Handler(AppDbContext db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Row>>
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Query, IReadOnlyList<Row>>
     {
-        public async Task<IReadOnlyList<Row>> Handle(Query q, CancellationToken ct)
-        {
-            var today = DateOnly.FromDateTime(DateTime.Today);
-            var scopedIds = DocumentScope.ApplyRead(db.Documents, user).Select(d => d.Id);
-            var data = await db.Tasks
-                .Where(t => scopedIds.Contains(t.DocumentId) && !t.TaskStatus.IsFinal && t.DueDate < today)
-                .Select(t => new
-                {
-                    t.Id,
-                    Doc = t.Document.Registration != null
-                        ? t.Document.Registration.RegistrationNumber + "/" + t.Document.Registration.RegistrationYear
-                        : "—",
-                    Executor = t.ExecutorEmployee.FullName,
-                    t.DueDate,
-                })
-                .ToListAsync(ct);
-            return data
-                .Select(x => new Row(x.Id, x.Doc, x.Executor, x.DueDate, today.DayNumber - x.DueDate.DayNumber))
-                .OrderByDescending(r => r.DaysOverdue)
-                .ToList();
-        }
+        public Task<IReadOnlyList<Row>> Handle(Query q, CancellationToken ct) =>
+            db.QueryProcAsync<Row>("dbo.usp_Report_OverdueTasks", SqlScope.Documents(user), ct);
     }
 }

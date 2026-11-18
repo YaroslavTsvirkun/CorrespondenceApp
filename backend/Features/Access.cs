@@ -1,10 +1,8 @@
 using CorrespondenceApi.Common;
-using CorrespondenceApi.Domain;
-using CorrespondenceApi.Infrastructure;
+using CorrespondenceApi.Infrastructure.Database;
+using Dapper;
 using FluentValidation;
-using FluentValidation.Results;
 using MediatR;
-using Microsoft.EntityFrameworkCore;
 
 namespace CorrespondenceApi.Features.Access;
 
@@ -47,11 +45,11 @@ public static class GetPermissions
     public record Query : IRequest<IReadOnlyList<Dto>>;
     public record Dto(string Code, string? Description, string? Category);
 
-    public class Handler(AppDbContext db) : IRequestHandler<Query, IReadOnlyList<Dto>>
+    public class Handler(Db db) : IRequestHandler<Query, IReadOnlyList<Dto>>
     {
-        public async Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
-            await db.Permissions.OrderBy(p => p.Category).ThenBy(p => p.Id)
-                .Select(p => new Dto(p.Code, p.Description, p.Category)).ToListAsync(ct);
+        public Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
+            db.QueryAsync<Dto>(
+                "SELECT Code, Description, Category FROM dbo.Permission ORDER BY Category, Id", null, ct);
     }
 }
 
@@ -60,18 +58,34 @@ public static class GetRoles
     public record Query : IRequest<IReadOnlyList<Dto>>;
     public record Dto(int Id, string Name, string? Description, int UserCount, IReadOnlyList<string> Permissions);
 
-    public class Handler(AppDbContext db) : IRequestHandler<Query, IReadOnlyList<Dto>>
+    private sealed record RoleRow(int Id, string Name, string? Description, int UserCount);
+    private sealed record RolePermissionRow(int RoleId, string Code);
+
+    public class Handler(Db db) : IRequestHandler<Query, IReadOnlyList<Dto>>
     {
-        public async Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
-            await db.Roles.OrderBy(r => r.Name)
-                .Select(r => new Dto(
-                    r.Id, r.Name, r.Description, r.UserRoles.Count,
-                    r.RolePermissions.Select(rp => rp.Permission.Code).ToList()))
-                .ToListAsync(ct);
+        public async Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct)
+        {
+            await using var c = await db.OpenAsync(ct);
+            using var grid = await c.QueryMultipleAsync(new CommandDefinition("""
+                SELECT r.Id, r.Name, r.Description,
+                       (SELECT COUNT(*) FROM dbo.UserRole ur WHERE ur.RoleId = r.Id) AS UserCount
+                FROM dbo.Role r
+                ORDER BY r.Name;
+
+                SELECT rp.RoleId, p.Code
+                FROM dbo.RolePermission rp
+                JOIN dbo.Permission p ON p.Id = rp.PermissionId;
+                """, cancellationToken: ct));
+            var roles = await grid.ReadAsync<RoleRow>();
+            var perms = (await grid.ReadAsync<RolePermissionRow>()).ToLookup(x => x.RoleId, x => x.Code);
+
+            return roles.Select(r => new Dto(r.Id, r.Name, r.Description, r.UserCount, perms[r.Id].ToList()))
+                .ToList();
+        }
     }
 }
 
-// Створення / оновлення ролі разом із набором її пермішенів.
+// Створення / оновлення ролі разом із набором її пермішенів (процедура dbo.usp_Role_Save).
 public static class SaveRole
 {
     public record Input(string Name, string? Description, List<string> Permissions);
@@ -82,57 +96,27 @@ public static class SaveRole
         public Validator() => RuleFor(x => x.Data.Name).NotEmpty().MaximumLength(50);
     }
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command, int>
+    public class Handler(Db db) : IRequestHandler<Command, int>
     {
-        public async Task<int> Handle(Command c, CancellationToken ct)
-        {
-            var permIds = await db.Permissions
-                .Where(p => c.Data.Permissions.Contains(p.Code))
-                .Select(p => p.Id).ToListAsync(ct);
-
-            Role role;
-            if (c.Id is int id)
+        public Task<int> Handle(Command c, CancellationToken ct) =>
+            db.ScalarProcAsync<int>("dbo.usp_Role_Save", new
             {
-                role = await db.Roles.Include(r => r.RolePermissions)
-                    .FirstOrDefaultAsync(r => r.Id == id, ct)
-                    ?? throw new NotFoundException($"Роль #{id} не знайдено");
-                role.Name = c.Data.Name;
-                role.Description = c.Data.Description;
-                role.RolePermissions.Clear();
-            }
-            else
-            {
-                role = new Role { Name = c.Data.Name, Description = c.Data.Description };
-                db.Roles.Add(role);
-            }
-
-            foreach (var pid in permIds)
-                role.RolePermissions.Add(new RolePermission { Role = role, PermissionId = pid });
-
-            await db.SaveChangesAsync(ct);
-            return role.Id;
-        }
+                c.Id,
+                c.Data.Name,
+                c.Data.Description,
+                PermissionCodes = string.Join(',', c.Data.Permissions ?? []),
+            }, ct);
     }
 }
 
+// Видалення ролі (процедура dbo.usp_Role_Delete забороняє видаляти призначену роль).
 public static class DeleteRole
 {
     public record Command(int Id) : IRequest;
 
-    public class Handler(AppDbContext db) : IRequestHandler<Command>
+    public class Handler(Db db) : IRequestHandler<Command>
     {
-        public async Task Handle(Command c, CancellationToken ct)
-        {
-            var role = await db.Roles.Include(r => r.UserRoles)
-                .FirstOrDefaultAsync(r => r.Id == c.Id, ct)
-                ?? throw new NotFoundException($"Роль #{c.Id} не знайдено");
-
-            if (role.UserRoles.Count > 0)
-                throw new ValidationException(
-                    [new ValidationFailure("role", "Роль призначена користувачам — спочатку зніміть призначення")]);
-
-            db.Roles.Remove(role);
-            await db.SaveChangesAsync(ct);
-        }
+        public Task Handle(Command c, CancellationToken ct) =>
+            db.ExecuteProcAsync("dbo.usp_Role_Delete", new { c.Id }, ct);
     }
 }
