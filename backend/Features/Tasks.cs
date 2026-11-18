@@ -23,6 +23,11 @@ public static class TasksEndpoints
             return Results.Created($"/api/tasks/{id}", new { id });
         }).RequireAuthorization(Permissions.TasksAssign);
 
+        // Одна резолюція — кілька виконавців (табличний параметр dbo.TaskAssignmentList)
+        g.MapPost("/batch", async (ISender m, CreateTaskBatch.Command cmd, CancellationToken ct) =>
+            Results.Ok(new { ids = await m.Send(cmd, ct) }))
+            .RequireAuthorization(Permissions.TasksAssign);
+
         g.MapPut("/{id:int}", async (ISender m, int id, TaskInput i, CancellationToken ct) =>
         {
             await m.Send(new UpdateTask.Command(id, i), ct);
@@ -48,18 +53,12 @@ public static class GetTasks
     {
         public Task<IReadOnlyList<Dto>> Handle(Query q, CancellationToken ct) =>
             db.QueryAsync<Dto>($"""
-                SELECT t.Id, t.DocumentId,
-                       dbo.fn_DocumentDisplayNumber(t.DocumentId) AS DocumentNumber,
-                       d.Title AS DocumentTitle,
-                       t.ExecutorEmployeeId, e.FullName AS ExecutorName,
-                       t.TaskStatusId AS StatusId, s.Name AS StatusName,
-                       t.TaskText, r.ResolutionText, t.DueDate, t.CompletedAt, t.ResultText
-                FROM dbo.ExecutionTask t
-                JOIN dbo.Document d   ON d.Id = t.DocumentId
-                JOIN dbo.Employee e   ON e.Id = t.ExecutorEmployeeId
-                JOIN dbo.TaskStatus s ON s.Id = t.TaskStatusId
-                JOIN dbo.Resolution r ON r.Id = t.ResolutionId
-                WHERE {SqlScope.DocumentFilter("d")}
+                SELECT t.Id, t.DocumentId, t.DocumentNumber, t.DocumentTitle,
+                       t.ExecutorEmployeeId, t.ExecutorName,
+                       t.TaskStatusId AS StatusId, t.StatusName,
+                       t.TaskText, t.ResolutionText, t.DueDate, t.CompletedAt, t.ResultText
+                FROM dbo.vw_Task t
+                JOIN {SqlScope.VisibleDocuments} v ON v.Id = t.DocumentId
                 ORDER BY t.DueDate DESC, t.Id DESC
                 """, SqlScope.Documents(user), ct);
     }
@@ -106,6 +105,46 @@ public static class CreateTask
                 i.ResultText,
             });
             return db.ScalarProcAsync<int>("dbo.usp_Task_Create", p, ct);
+        }
+    }
+}
+
+// Пакетне створення: процедура dbo.usp_Task_CreateBatch з табличним параметром dbo.TaskAssignmentList
+public static class CreateTaskBatch
+{
+    public record Item(int ExecutorEmployeeId, int StatusId, string TaskText, DateOnly DueDate);
+    public record Command(int DocumentId, string ResolutionText, DateOnly? ResolutionDueDate, List<Item> Tasks)
+        : IRequest<IReadOnlyList<int>>;
+
+    public class Validator : AbstractValidator<Command>
+    {
+        public Validator()
+        {
+            RuleFor(x => x.DocumentId).GreaterThan(0).WithMessage("Оберіть документ");
+            RuleFor(x => x.ResolutionText).NotEmpty().WithMessage("Вкажіть текст резолюції").MaximumLength(1000);
+            RuleFor(x => x.Tasks).NotEmpty().WithMessage("Додайте хоча б одне доручення");
+            RuleForEach(x => x.Tasks).ChildRules(t =>
+            {
+                t.RuleFor(i => i.ExecutorEmployeeId).GreaterThan(0).WithMessage("Оберіть виконавця");
+                t.RuleFor(i => i.StatusId).GreaterThan(0).WithMessage("Оберіть статус");
+                t.RuleFor(i => i.TaskText).NotEmpty().WithMessage("Вкажіть завдання").MaximumLength(1000);
+                t.RuleFor(i => i.DueDate).NotEqual(default(DateOnly)).WithMessage("Вкажіть строк");
+            });
+        }
+    }
+
+    public class Handler(Db db, ICurrentUser user) : IRequestHandler<Command, IReadOnlyList<int>>
+    {
+        public Task<IReadOnlyList<int>> Handle(Command c, CancellationToken ct)
+        {
+            var p = SqlScope.Tenant(user);
+            p.Add("DocumentId", c.DocumentId);
+            p.Add("ResolutionText", c.ResolutionText);
+            p.Add("ResolutionDueDate", c.ResolutionDueDate);
+            p.Add("AuthorEmployeeId", user.EmployeeId);
+            p.Add("Tasks", SqlTvp.TaskAssignments(
+                c.Tasks.Select(t => (t.ExecutorEmployeeId, t.StatusId, t.TaskText, t.DueDate))));
+            return db.QueryProcAsync<int>("dbo.usp_Task_CreateBatch", p, ct);
         }
     }
 }

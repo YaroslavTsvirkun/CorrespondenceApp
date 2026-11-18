@@ -9,12 +9,11 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    SELECT t.Name AS [Type], COUNT(*) AS [Count]
-    FROM dbo.Document d
-    JOIN dbo.DocumentType t ON t.Id = d.DocumentTypeId
-    WHERE (@Bypass = 1 OR d.OrganizationId = @TenantOrganizationId)
-      AND dbo.fn_CanReadDocument(d.Id, @ScopeLevel, @EmployeeId, @DepartmentId) = 1
-    GROUP BY t.Name
+    SELECT d.DocumentType AS [Type], COUNT(*) AS [Count]
+    FROM dbo.vw_Document d
+    JOIN dbo.fn_VisibleDocuments(@ScopeLevel, @EmployeeId, @DepartmentId, @Bypass, @TenantOrganizationId) v
+        ON v.Id = d.Id
+    GROUP BY d.DocumentType
     ORDER BY [Count] DESC, [Type];
 END;
 GO

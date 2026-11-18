@@ -104,7 +104,7 @@ public static class SaveRole
                 c.Id,
                 c.Data.Name,
                 c.Data.Description,
-                PermissionCodes = string.Join(',', c.Data.Permissions ?? []),
+                PermissionCodes = SqlTvp.CodeList(c.Data.Permissions ?? []),
             }, ct);
     }
 }

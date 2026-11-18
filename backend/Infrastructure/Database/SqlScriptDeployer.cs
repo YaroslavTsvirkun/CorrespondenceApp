@@ -9,11 +9,14 @@ namespace CorrespondenceApi.Infrastructure.Database;
 /// <summary>
 /// Автоматичне розгортання SQL-коду з директорії проєкту <c>Database/</c> у БД.
 /// Порядок етапів:
-///   1. <c>Schema</c>     — одноразові скрипти (таблиці, індекси), журнал у dbo.__SchemaVersions;
-///   2. <c>Functions</c>  — скалярні функції  (CREATE OR ALTER, виконуються при кожному старті);
-///   3. <c>Procedures</c> — збережені процедури (CREATE OR ALTER, при кожному старті);
-///   4. <c>Triggers</c>   — тригери            (CREATE OR ALTER, при кожному старті);
-///   5. <c>Seed</c>       — одноразові скрипти початкових даних (журналюються).
+///   1. <c>Schema</c>         — одноразові скрипти (таблиці, індекси), журнал у dbo.__SchemaVersions;
+///   2. <c>Types</c>          — табличні типи (IF TYPE_ID(...) IS NULL CREATE TYPE, при кожному старті);
+///   3. <c>TableFunctions</c> — табличні функції (CREATE OR ALTER, при кожному старті);
+///   4. <c>Functions</c>      — скалярні функції  (CREATE OR ALTER, при кожному старті);
+///   5. <c>Views</c>          — представлення      (CREATE OR ALTER, при кожному старті);
+///   6. <c>Procedures</c>     — збережені процедури (CREATE OR ALTER, при кожному старті);
+///   7. <c>Triggers</c>       — тригери            (CREATE OR ALTER, при кожному старті);
+///   8. <c>Seed</c>           — одноразові скрипти початкових даних (журналюються).
 /// Усередині етапу скрипти виконуються в алфавітному порядку імен файлів.
 /// Скрипт ділиться на пакети за рядками <c>GO</c>; кожен скрипт виконується в окремій транзакції.
 /// </summary>
@@ -24,7 +27,10 @@ public sealed class SqlScriptDeployer(DatabaseOptions options, ILogger<SqlScript
     private static readonly (string Folder, bool RunOnce)[] Stages =
     [
         ("Schema", true),
+        ("Types", false),
+        ("TableFunctions", false),
         ("Functions", false),
+        ("Views", false),
         ("Procedures", false),
         ("Triggers", false),
         ("Seed", true),

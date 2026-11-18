@@ -1,6 +1,7 @@
 /* Процедура: дані користувача для автентифікації/авторизації.
    Пошук за @UserId або (якщо він NULL) за @UserName.
-   Результати: 1) користувач; 2) назви ролей; 3) коди пермішенів (унікальні). */
+   Результати: 1) користувач (vw_UserAccount + хеш пароля); 2) назви ролей;
+   3) коди пермішенів (таблична функція dbo.fn_UserPermissions). */
 CREATE OR ALTER PROCEDURE dbo.usp_User_GetAccess
     @UserId   int          = NULL,
     @UserName nvarchar(50) = NULL
@@ -11,12 +12,11 @@ BEGIN
     IF @UserId IS NULL
         SELECT @UserId = Id FROM dbo.AppUser WHERE UserName = @UserName;
 
-    SELECT u.Id, u.UserName, u.PasswordHash, u.FullName, u.EmployeeId,
-           e.DepartmentId, u.OrganizationId, o.Name AS OrganizationName, u.IsActive
-    FROM dbo.AppUser u
-    LEFT JOIN dbo.Employee e     ON e.Id = u.EmployeeId
-    LEFT JOIN dbo.Organization o ON o.Id = u.OrganizationId
-    WHERE u.Id = @UserId;
+    SELECT a.Id, a.UserName, u.PasswordHash, a.FullName, a.EmployeeId,
+           a.DepartmentId, a.OrganizationId, a.OrganizationName, a.IsActive
+    FROM dbo.vw_UserAccount a
+    JOIN dbo.AppUser u ON u.Id = a.Id
+    WHERE a.Id = @UserId;
 
     SELECT r.Name
     FROM dbo.UserRole ur
@@ -24,10 +24,6 @@ BEGIN
     WHERE ur.UserId = @UserId
     ORDER BY r.Name;
 
-    SELECT DISTINCT p.Code
-    FROM dbo.UserRole ur
-    JOIN dbo.RolePermission rp ON rp.RoleId = ur.RoleId
-    JOIN dbo.Permission p      ON p.Id = rp.PermissionId
-    WHERE ur.UserId = @UserId;
+    SELECT Code FROM dbo.fn_UserPermissions(@UserId);
 END;
 GO

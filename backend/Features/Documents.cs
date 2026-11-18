@@ -104,13 +104,13 @@ public static class GetDocuments
         public async Task<PagedResult<ListItem>> Handle(Query q, CancellationToken ct)
         {
             var p = SqlScope.Documents(user);
-            var where = new List<string> { SqlScope.DocumentFilter("d") };
+            var where = new List<string> { "1 = 1" };
 
             if (!string.IsNullOrWhiteSpace(q.Search))
             {
                 p.Add("Search", "%" + SqlText.EscapeLike(q.Search.Trim()) + "%");
                 where.Add($"(d.Title LIKE @Search ESCAPE '{SqlText.LikeEscape}' " +
-                          $"OR r.RegistrationNumber LIKE @Search ESCAPE '{SqlText.LikeEscape}')");
+                          $"OR d.RegistrationNumber LIKE @Search ESCAPE '{SqlText.LikeEscape}')");
             }
             if (q.DirectionId is int dir) { p.Add("DirectionId", dir); where.Add("d.DirectionId = @DirectionId"); }
             if (q.DocumentTypeId is int dt) { p.Add("DocumentTypeId", dt); where.Add("d.DocumentTypeId = @DocumentTypeId"); }
@@ -122,7 +122,7 @@ public static class GetDocuments
             var direction = q.Desc ?? true ? "DESC" : "ASC";
             var orderBy = q.SortBy switch
             {
-                "number" => $"r.RegistrationNumber {direction}",
+                "number" => $"d.RegistrationNumber {direction}",
                 "title" => $"d.Title {direction}",
                 _ => $"d.DocumentDate {direction}",
             };
@@ -132,25 +132,21 @@ public static class GetDocuments
             p.Add("Skip", (page - 1) * size);
             p.Add("Take", size);
 
-            var filter = string.Join(" AND ", where);
+            // Представлення dbo.vw_Document + таблична функція видимості dbo.fn_VisibleDocuments
+            var from = $"""
+                FROM dbo.vw_Document d
+                JOIN {SqlScope.VisibleDocuments} v ON v.Id = d.Id
+                WHERE {string.Join(" AND ", where)}
+                """;
             var sql = $"""
-                SELECT COUNT(*)
-                FROM dbo.Document d
-                LEFT JOIN dbo.RegistrationRecord r ON r.DocumentId = d.Id
-                WHERE {filter};
+                SELECT COUNT(*) {from};
 
                 SELECT d.Id,
-                       ISNULL(r.RegistrationNumber, N'') AS RegistrationNumber,
-                       ISNULL(r.RegistrationYear, 0)     AS RegistrationYear,
-                       dir.Name AS Direction, t.Name AS DocumentType, d.Title,
-                       c.Name AS Correspondent, d.DocumentDate, s.Name AS Status, d.IsControlled
-                FROM dbo.Document d
-                LEFT JOIN dbo.RegistrationRecord r ON r.DocumentId = d.Id
-                JOIN dbo.DocumentDirection dir     ON dir.Id = d.DirectionId
-                JOIN dbo.DocumentType t            ON t.Id = d.DocumentTypeId
-                JOIN dbo.DocumentStatus s          ON s.Id = d.CurrentStatusId
-                LEFT JOIN dbo.Correspondent c      ON c.Id = d.CorrespondentId
-                WHERE {filter}
+                       ISNULL(d.RegistrationNumber, N'') AS RegistrationNumber,
+                       ISNULL(d.RegistrationYear, 0)     AS RegistrationYear,
+                       d.Direction, d.DocumentType, d.Title,
+                       d.Correspondent, d.DocumentDate, d.Status, d.IsControlled
+                {from}
                 ORDER BY {orderBy}, d.Id {direction}
                 OFFSET @Skip ROWS FETCH NEXT @Take ROWS ONLY;
                 """;
@@ -195,31 +191,18 @@ public static class GetDocumentById
 
             var sql = $"""
                 SELECT d.Id,
-                       ISNULL(r.RegistrationNumber, N'') AS RegistrationNumber,
-                       ISNULL(r.RegistrationYear, 0) AS RegistrationYear,
-                       ISNULL(r.RegisteredAt, CAST('0001-01-01' AS datetime2)) AS RegisteredAt,
-                       ISNULL(reg.FullName, N'') AS Registrar,
-                       dir.Name AS Direction, t.Name AS DocumentType, s.Name AS Status, d.IsControlled,
-                       ch.Name AS Channel, c.Name AS Correspondent,
-                       sd.Name AS SenderDepartment, rd.Name AS ReceiverDepartment, a.FullName AS Author,
+                       ISNULL(d.RegistrationNumber, N'') AS RegistrationNumber,
+                       ISNULL(d.RegistrationYear, 0) AS RegistrationYear,
+                       ISNULL(d.RegisteredAt, CAST('0001-01-01' AS datetime2)) AS RegisteredAt,
+                       ISNULL(d.Registrar, N'') AS Registrar,
+                       d.Direction, d.DocumentType, d.Status, d.IsControlled,
+                       d.Channel, d.Correspondent, d.SenderDepartment, d.ReceiverDepartment, d.Author,
                        d.Title, d.Summary, d.DocumentDate, d.IncomingNumber, d.Note
-                FROM dbo.Document d
-                LEFT JOIN dbo.RegistrationRecord r ON r.DocumentId = d.Id
-                LEFT JOIN dbo.Employee reg         ON reg.Id = r.RegistrarEmployeeId
-                JOIN dbo.DocumentDirection dir     ON dir.Id = d.DirectionId
-                JOIN dbo.DocumentType t            ON t.Id = d.DocumentTypeId
-                JOIN dbo.DocumentStatus s          ON s.Id = d.CurrentStatusId
-                LEFT JOIN dbo.DeliveryChannel ch   ON ch.Id = d.DeliveryChannelId
-                LEFT JOIN dbo.Correspondent c      ON c.Id = d.CorrespondentId
-                LEFT JOIN dbo.Department sd        ON sd.Id = d.SenderDepartmentId
-                LEFT JOIN dbo.Department rd        ON rd.Id = d.ReceiverDepartmentId
-                LEFT JOIN dbo.Employee a           ON a.Id = d.AuthorEmployeeId
+                FROM dbo.vw_Document d
                 WHERE d.Id = @Id AND {SqlScope.DocumentFilter("d")};
 
-                SELECT t.Id, e.FullName AS Executor, t.TaskText, t.DueDate, s.Name AS Status, t.CompletedAt
-                FROM dbo.ExecutionTask t
-                JOIN dbo.Employee e   ON e.Id = t.ExecutorEmployeeId
-                JOIN dbo.TaskStatus s ON s.Id = t.TaskStatusId
+                SELECT t.Id, t.ExecutorName AS Executor, t.TaskText, t.DueDate, t.StatusName AS Status, t.CompletedAt
+                FROM dbo.vw_Task t
                 WHERE t.DocumentId = @Id
                 ORDER BY t.Id;
                 """;
@@ -256,11 +239,10 @@ public static class GetDocumentForEdit
                        d.DeliveryChannelId, d.CorrespondentId, d.SenderDepartmentId,
                        d.ReceiverDepartmentId, d.AuthorEmployeeId,
                        d.Title, d.Summary, d.DocumentDate, d.IncomingNumber, d.IsControlled, d.Note,
-                       ISNULL(r.RegistrationNumber, N'')        AS RegistrationNumber,
-                       ISNULL(r.RegistrationYear, @CurrentYear) AS RegistrationYear,
-                       ISNULL(r.RegistrarEmployeeId, 0)         AS RegistrarEmployeeId
-                FROM dbo.Document d
-                LEFT JOIN dbo.RegistrationRecord r ON r.DocumentId = d.Id
+                       ISNULL(d.RegistrationNumber, N'')        AS RegistrationNumber,
+                       ISNULL(d.RegistrationYear, @CurrentYear) AS RegistrationYear,
+                       ISNULL(d.RegistrarEmployeeId, 0)         AS RegistrarEmployeeId
+                FROM dbo.vw_Document d
                 WHERE d.Id = @Id AND {SqlScope.DocumentFilter("d")}
                 """, p, ct);
             return d ?? throw new NotFoundException($"Документ #{q.Id} не знайдено");

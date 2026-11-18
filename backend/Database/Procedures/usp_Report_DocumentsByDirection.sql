@@ -9,23 +9,17 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    WITH Scoped AS
+    WITH Grouped AS
     (
-        SELECT d.DirectionId
-        FROM dbo.Document d
-        WHERE (@Bypass = 1 OR d.OrganizationId = @TenantOrganizationId)
-          AND dbo.fn_CanReadDocument(d.Id, @ScopeLevel, @EmployeeId, @DepartmentId) = 1
-    ),
-    Grouped AS
-    (
-        SELECT dir.Name AS Direction, COUNT(*) AS [Count]
-        FROM Scoped s
-        JOIN dbo.DocumentDirection dir ON dir.Id = s.DirectionId
-        GROUP BY dir.Name
+        SELECT d.Direction, COUNT(*) AS [Count]
+        FROM dbo.vw_Document d
+        JOIN dbo.fn_VisibleDocuments(@ScopeLevel, @EmployeeId, @DepartmentId, @Bypass, @TenantOrganizationId) v
+            ON v.Id = d.Id
+        GROUP BY d.Direction
     )
     SELECT g.Direction,
            g.[Count],
-           dbo.fn_Percent(g.[Count], (SELECT COUNT(*) FROM Scoped)) AS [Percent]
+           dbo.fn_Percent(g.[Count], SUM(g.[Count]) OVER ()) AS [Percent]
     FROM Grouped g
     ORDER BY g.[Count] DESC, g.Direction;
 END;
