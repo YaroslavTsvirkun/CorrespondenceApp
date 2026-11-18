@@ -1,11 +1,11 @@
 /* Процедура: створення (@Id = NULL) або оновлення ролі разом із набором пермішенів.
-   @PermissionCodes — коди пермішенів через кому (невідомі коди ігноруються).
+   @PermissionCodes — табличний параметр dbo.CodeList (невідомі коди ігноруються).
    Повертає: Id ролі. */
 CREATE OR ALTER PROCEDURE dbo.usp_Role_Save
     @Id              int,
     @Name            nvarchar(50),
     @Description     nvarchar(max),
-    @PermissionCodes nvarchar(max)
+    @PermissionCodes dbo.CodeList READONLY
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -30,9 +30,9 @@ BEGIN
     DELETE dbo.RolePermission WHERE RoleId = @Id;
 
     INSERT dbo.RolePermission (RoleId, PermissionId)
-    SELECT DISTINCT @Id, p.Id
-    FROM STRING_SPLIT(ISNULL(@PermissionCodes, N''), N',') s
-    JOIN dbo.Permission p ON p.Code = TRIM(s.value);
+    SELECT @Id, p.Id
+    FROM @PermissionCodes x
+    JOIN dbo.Permission p ON p.Code = x.Code;
 
     COMMIT TRANSACTION;
 

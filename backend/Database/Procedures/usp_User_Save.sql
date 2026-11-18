@@ -1,6 +1,6 @@
 /* Процедура: створення (@Id = NULL) або оновлення користувача разом із його ролями.
    @PasswordHash = NULL під час оновлення — пароль не змінюється.
-   @RoleIds — список Id ролей через кому (напр. N'1,3').
+   @RoleIds — табличний параметр dbo.IdList з Id ролей.
    Повертає: Id користувача. */
 CREATE OR ALTER PROCEDURE dbo.usp_User_Save
     @Id             int,
@@ -10,7 +10,7 @@ CREATE OR ALTER PROCEDURE dbo.usp_User_Save
     @OrganizationId int,
     @EmployeeId     int,
     @IsActive       bit,
-    @RoleIds        nvarchar(max)
+    @RoleIds        dbo.IdList READONLY
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -48,9 +48,9 @@ BEGIN
     DELETE dbo.UserRole WHERE UserId = @Id;
 
     INSERT dbo.UserRole (UserId, RoleId)
-    SELECT DISTINCT @Id, r.Id
-    FROM STRING_SPLIT(ISNULL(@RoleIds, N''), N',') s
-    JOIN dbo.Role r ON r.Id = TRY_CAST(TRIM(s.value) AS int);
+    SELECT @Id, r.Id
+    FROM @RoleIds x
+    JOIN dbo.Role r ON r.Id = x.Id;
 
     COMMIT TRANSACTION;
 

@@ -6,7 +6,7 @@
 |---|---|
 | **AppHost** (`AppHost/`) | .NET Aspire — оркестрація: запускає бекенд і фронтенд разом, дашборд, телеметрія, service discovery. |
 | **ServiceDefaults** (`ServiceDefaults/`) | Спільні налаштування Aspire: OpenTelemetry, health checks, resilience. |
-| **backend** (`backend/CorrespondenceApi.csproj`) | ASP.NET Core 10, **Dapper** + Microsoft.Data.SqlClient (MS SQL Server LocalDB), MediatR, FluentValidation, JWT. Архітектура — Vertical Slice. Бізнес-логіка БД — скалярні функції, збережені процедури та тригери (`backend/Database/`). |
+| **backend** (`backend/CorrespondenceApi.csproj`) | ASP.NET Core 10, **Dapper** + Microsoft.Data.SqlClient (MS SQL Server LocalDB), MediatR, FluentValidation, JWT. Архітектура — Vertical Slice. Бізнес-логіка БД — скалярні й табличні функції, представлення, табличні типи, збережені процедури та тригери (`backend/Database/`). |
 | **frontend** (`frontend/`) | React 19 + TypeScript + Vite + Ant Design. Запускається через Aspire (`AddViteApp`). |
 
 ## Запуск (один крок)
@@ -42,11 +42,14 @@ dotnet run -- --deploy-db   # створить/оновить БД і завер
 
 ```
 backend/Database/
-├── Schema/       001_Tables.sql            — таблиці, ключі, індекси (одноразово)
-├── Functions/    fn_*.sql                  — скалярні функції (щоразу, CREATE OR ALTER)
-├── Procedures/   usp_*.sql                 — збережені процедури (щоразу, CREATE OR ALTER)
-├── Triggers/     trg_*.sql                 — тригери (щоразу, CREATE OR ALTER)
-└── Seed/         001..003_*.sql            — довідники, демо-дані, ролі й користувачі (одноразово)
+├── Schema/         001_Tables.sql          — таблиці, ключі, індекси (одноразово)
+├── Types/          *.sql                   — табличні типи (User-Defined Table Types)
+├── TableFunctions/ fn_*.sql                — inline-табличні функції (щоразу, CREATE OR ALTER)
+├── Functions/      fn_*.sql                — скалярні функції (щоразу, CREATE OR ALTER)
+├── Views/          vw_*.sql                — представлення (щоразу, CREATE OR ALTER)
+├── Procedures/     usp_*.sql               — збережені процедури (щоразу, CREATE OR ALTER)
+├── Triggers/       trg_*.sql               — тригери (щоразу, CREATE OR ALTER)
+└── Seed/           001..003_*.sql          — довідники, демо-дані, ролі й користувачі (одноразово)
 ```
 
 Деплоєр (`Infrastructure/Database/SqlScriptDeployer.cs`) створює БД, якщо її немає,

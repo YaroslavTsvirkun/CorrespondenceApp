@@ -9,21 +9,12 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    SELECT x.TaskId, x.Document, x.Executor, x.DueDate, x.DaysOverdue
-    FROM
-    (
-        SELECT t.Id AS TaskId,
-               dbo.fn_DocumentDisplayNumber(t.DocumentId) AS Document,
-               e.FullName AS Executor,
-               t.DueDate,
-               dbo.fn_TaskDaysOverdue(t.DueDate, t.TaskStatusId) AS DaysOverdue
-        FROM dbo.ExecutionTask t
-        JOIN dbo.Document d ON d.Id = t.DocumentId
-        JOIN dbo.Employee e ON e.Id = t.ExecutorEmployeeId
-        WHERE (@Bypass = 1 OR d.OrganizationId = @TenantOrganizationId)
-          AND dbo.fn_CanReadDocument(d.Id, @ScopeLevel, @EmployeeId, @DepartmentId) = 1
-    ) x
-    WHERE x.DaysOverdue > 0
-    ORDER BY x.DaysOverdue DESC;
+    SELECT t.Id AS TaskId, t.DocumentNumber AS Document, t.ExecutorName AS Executor,
+           t.DueDate, t.DaysOverdue
+    FROM dbo.vw_Task t
+    JOIN dbo.fn_VisibleDocuments(@ScopeLevel, @EmployeeId, @DepartmentId, @Bypass, @TenantOrganizationId) v
+        ON v.Id = t.DocumentId
+    WHERE t.DaysOverdue > 0
+    ORDER BY t.DaysOverdue DESC;
 END;
 GO

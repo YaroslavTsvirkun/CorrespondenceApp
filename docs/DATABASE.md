@@ -1,7 +1,8 @@
 # База даних: Dapper + SQL-код у БД
 
 Бекенд працює з MS SQL Server через **Dapper** (`Microsoft.Data.SqlClient`).
-Структура БД і серверна логіка (скалярні функції, збережені процедури, тригери)
+Структура БД і серверна логіка (скалярні та табличні функції, представлення,
+табличні типи, збережені процедури, тригери)
 зберігаються як SQL-файли в `backend/Database/` і **автоматично розгортаються** в БД
 під час старту застосунку.
 
@@ -16,10 +17,16 @@
 | Етап | Директорія | Режим |
 |---|---|---|
 | 1 | `Schema/` | **одноразово** (журналюється) |
-| 2 | `Functions/` | **щоразу** — `CREATE OR ALTER` |
-| 3 | `Procedures/` | **щоразу** — `CREATE OR ALTER` |
-| 4 | `Triggers/` | **щоразу** — `CREATE OR ALTER` |
-| 5 | `Seed/` | **одноразово** (журналюється) |
+| 2 | `Types/` | **щоразу**, але ідемпотентно — `IF TYPE_ID(...) IS NULL CREATE TYPE` |
+| 3 | `TableFunctions/` | **щоразу** — `CREATE OR ALTER` |
+| 4 | `Functions/` | **щоразу** — `CREATE OR ALTER` |
+| 5 | `Views/` | **щоразу** — `CREATE OR ALTER` |
+| 6 | `Procedures/` | **щоразу** — `CREATE OR ALTER` |
+| 7 | `Triggers/` | **щоразу** — `CREATE OR ALTER` |
+| 8 | `Seed/` | **одноразово** (журналюється) |
+
+Порядок відображає залежності: процедури використовують типи, скалярна
+`fn_CanReadDocument` — табличну `fn_VisibleDocuments`, представлення — скалярні функції.
 
 * Скрипт ділиться на пакети за рядками `GO`; кожен скрипт виконується в окремій транзакції
   (помилка — відкат і зупинка старту з назвою скрипта в повідомленні).
@@ -50,6 +57,41 @@
 
 ## Об'єкти БД
 
+### Табличні типи (`Types/`) — User-Defined Table Types
+
+| Тип | Структура | Де використовується |
+|---|---|---|
+| `dbo.IdList` | `Id int PK` | `usp_User_Save @RoleIds`, перевірка ролей у `SaveUser` |
+| `dbo.CodeList` | `Code nvarchar(80) PK` | `usp_Role_Save @PermissionCodes` |
+| `dbo.TaskAssignmentList` | `RowNo PK, ExecutorEmployeeId, TaskStatusId, TaskText, DueDate` | `usp_Task_CreateBatch @Tasks` |
+
+У C# параметри формує `SqlTvp` (`Infrastructure/Database/Db.cs`) через
+`DataTable.AsTableValuedParameter("dbo.…")`. Для типів немає `CREATE OR ALTER`: щоб змінити
+визначення, видаліть залежні процедури та виконайте `DROP TYPE` — наступний деплой створить усе заново.
+
+### Inline-табличні функції (`TableFunctions/`)
+
+| Функція | Повертає | Де використовується |
+|---|---|---|
+| `fn_VisibleDocuments(@ScopeLevel, @EmployeeId, @DepartmentId, @Bypass, @TenantOrganizationId)` | `Id` документів, видимих користувачу (тенант + зона видимості) | список документів, список доручень, усі звіти, `fn_CanReadDocument` |
+| `fn_UserPermissions(@UserId)` | унікальні коди пермішенів | `usp_User_GetAccess` |
+| `fn_RolesWithPermission(@PermissionCode)` | `RoleId` ролей з пермішеном | визначення «супер-» ролей у користувачах |
+
+Inline TVF оптимізатор вбудовує в план як підзапит, тому для списків вона ефективніша за
+скалярну функцію в `WHERE` (та виконується для кожного рядка). Логіка видимості існує в
+одному місці — `fn_VisibleDocuments`; скалярна `fn_CanReadDocument` лише делегує їй.
+
+### Представлення (`Views/`)
+
+| Представлення | Зміст | Де використовується |
+|---|---|---|
+| `vw_Document` | документ + реєстрація + назви з довідників, підрозділи, автор, реєстратор | список, картка, форма редагування, звіти за типом/напрямом |
+| `vw_Task` | доручення + документ (номер через `fn_DocumentDisplayNumber`), резолюція, виконавець, статус, `DaysOverdue` | список доручень, картка документа, звіти виконавської дисципліни та прострочених |
+| `vw_UserAccount` | користувач + організація + працівник/підрозділ, ознака супер-адміна (без хешу пароля) | список користувачів, `usp_User_GetAccess` |
+
+Представлення не фільтрують доступ — завжди поєднуйте їх із `fn_VisibleDocuments`
+(`JOIN … v ON v.Id = d.Id`) або тенант-умовою.
+
 ### Скалярні функції (`Functions/`)
 
 | Функція | Призначення | Де використовується |
@@ -57,9 +99,9 @@
 | `fn_FormatRegistrationNumber(@Pattern, @Seq, @Year, @TypeCode, @DirCode)` | Формує реєстраційний номер за патерном (`{seq}`, `{seq:000}`, `{year}`, `{yy}`, `{type}`, `{dir}`) | `usp_RegistrationNumber_Next`, налаштування (попередній перегляд), seed |
 | `fn_NextRegistrationSequence(@OrganizationId, @DocumentTypeId, @Year)` | Наступне значення лічильника номера | `usp_RegistrationNumber_Next` |
 | `fn_IsRegistrationNumberTaken(@OrganizationId, @Year, @Number, @ExcludeDocumentId)` | Чи зайнятий номер в організації за рік | створення/редагування документа |
-| `fn_CanReadDocument(@DocumentId, @ScopeLevel, @EmployeeId, @DepartmentId)` | Зона видимості документа: 3 — усі, 2 — свого підрозділу, 1 — задіяні, 0 — немає | списки документів, доручень, звіти |
-| `fn_DocumentDisplayNumber(@DocumentId)` | «номер/рік» або «—» | список доручень, звіт прострочених |
-| `fn_TaskDaysOverdue(@DueDate, @TaskStatusId)` | Кількість днів прострочення | звіт прострочених доручень |
+| `fn_CanReadDocument(@DocumentId, @ScopeLevel, @EmployeeId, @DepartmentId)` | Чи видимий один документ (3 — усі, 2 — свого підрозділу, 1 — задіяні, 0 — немає); делегує `fn_VisibleDocuments` | картка та форма редагування документа |
+| `fn_DocumentDisplayNumber(@DocumentId)` | «номер/рік» або «—» | `vw_Task` |
+| `fn_TaskDaysOverdue(@DueDate, @TaskStatusId)` | Кількість днів прострочення | `vw_Task` |
 | `fn_Percent(@Part, @Total)` | Цілий відсоток | звіти |
 
 ### Збережені процедури (`Procedures/`)
@@ -70,9 +112,10 @@
 | `usp_Document_Create` | Реєстрація документа + реєстраційний запис; автонумерація під `sp_getapplock` (без колізій при паралельній реєстрації) |
 | `usp_Document_Update` / `usp_Document_Delete` | Редагування / видалення з тенант-перевіркою |
 | `usp_Task_Create` / `usp_Task_Update` / `usp_Task_Delete` | Доручення разом із резолюцією |
+| `usp_Task_CreateBatch` | Одна резолюція + кілька доручень різним виконавцям (`@Tasks dbo.TaskAssignmentList`), перевірка виконавців за організацією; API `POST /api/tasks/batch` |
 | `usp_Report_DocumentsByType`, `usp_Report_DocumentsByDirection`, `usp_Report_ExecutorDiscipline`, `usp_Report_OverdueTasks` | Звіти з урахуванням тенанта та зони видимості |
 | `usp_User_GetAccess` | Користувач + ролі + пермішени (логін, `/me`, динамічні клейми на кожен запит) |
-| `usp_User_Save`, `usp_Role_Save`, `usp_Role_Delete` | Користувачі та ролі з їх зв'язками в одній транзакції |
+| `usp_User_Save` (`@RoleIds dbo.IdList`), `usp_Role_Save` (`@PermissionCodes dbo.CodeList`), `usp_Role_Delete` | Користувачі та ролі з їх зв'язками в одній транзакції |
 | `usp_Organization_Delete`, `usp_Department_Delete` | Видалення з перевіркою залежностей |
 
 **Коди помилок.** Процедури повідомляють про бізнес-помилки через `THROW`:
@@ -96,8 +139,10 @@
 * `Db` — scoped-фабрика підключень і обгортки Dapper (`QueryAsync`, `ExecuteProcAsync`,
   `ScalarProcAsync`, `QueryProcAsync`, …).
 * `SqlScope` — параметри тенант-ізоляції (`@Bypass`, `@TenantOrganizationId`) і зони
-  видимості (`@ScopeLevel`, `@EmployeeId`, `@DepartmentId`) та готові SQL-умови
-  `TenantFilter("x")`, `DocumentFilter("d")`. Замінюють глобальні query-фільтри EF.
+  видимості (`@ScopeLevel`, `@EmployeeId`, `@DepartmentId`) та готові SQL-фрагменти:
+  `VisibleDocuments` (виклик `fn_VisibleDocuments` для JOIN у списках),
+  `DocumentFilter("d")` (один документ), `TenantFilter("x")`.
+* `SqlTvp` — табличні параметри `IdList`, `CodeList`, `TaskAssignments`.
 * `DateOnlyTypeHandler` — підтримка `DateOnly` для колонок `date`.
 * Хендлери MediatR (Vertical Slice, `Features/*.cs`) виконують параметризований SQL або
   викликають процедури; DTO-записи мапляться Dapper за конструктором (порядок і імена
@@ -105,8 +150,9 @@
 
 ## Як додати новий SQL-код
 
-* **Нова функція / процедура / тригер** — файл у відповідній директорії з `CREATE OR ALTER`
-  і `GO` в кінці. Розгорнеться при наступному старті.
+* **Нова функція / представлення / процедура / тригер** — файл у відповідній директорії
+  з `CREATE OR ALTER` і `GO` в кінці. Розгорнеться при наступному старті.
+* **Новий табличний тип** — файл у `Types/` з `IF TYPE_ID(N'dbo.X') IS NULL CREATE TYPE …`.
 * **Зміна структури** — новий одноразовий скрипт `Schema/00N_Опис.sql` (ідемпотентний:
   `IF COL_LENGTH(...) IS NULL ALTER TABLE ...`). Старі одноразові скрипти не редагуйте.
 * **Нові початкові дані** — новий `Seed/00N_Опис.sql` з перевіркою `IF NOT EXISTS`.

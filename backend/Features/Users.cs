@@ -65,12 +65,9 @@ public static class GetUsers
         {
             await using var c = await db.OpenAsync(ct);
             using var grid = await c.QueryMultipleAsync(new CommandDefinition($"""
-                SELECT u.Id, u.UserName, u.FullName, u.OrganizationId, o.Name AS OrganizationName,
-                       u.EmployeeId, e.FullName AS EmployeeName, u.IsActive,
-                       CAST(CASE WHEN u.OrganizationId IS NULL THEN 1 ELSE 0 END AS bit) AS IsSuperAdmin
-                FROM dbo.AppUser u
-                LEFT JOIN dbo.Organization o ON o.Id = u.OrganizationId
-                LEFT JOIN dbo.Employee e     ON e.Id = u.EmployeeId
+                SELECT u.Id, u.UserName, u.FullName, u.OrganizationId, u.OrganizationName,
+                       u.EmployeeId, u.EmployeeName, u.IsActive, u.IsSuperAdmin
+                FROM dbo.vw_UserAccount u
                 WHERE {SqlScope.TenantFilter("u")}
                 ORDER BY u.FullName;
 
@@ -114,12 +111,9 @@ public static class GetUserOptions
                 ORDER BY o.Name;
 
                 -- Роль вважається «супер», якщо надає право керування організаціями
-                SELECT r.Id, r.Name,
-                       CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.RolePermission rp
-                                              JOIN dbo.Permission pm ON pm.Id = rp.PermissionId
-                                              WHERE rp.RoleId = r.Id AND pm.Code = @SuperPermission)
-                                 THEN 1 ELSE 0 END AS bit) AS IsSuper
+                SELECT r.Id, r.Name, CAST(CASE WHEN s.RoleId IS NULL THEN 0 ELSE 1 END AS bit) AS IsSuper
                 FROM dbo.Role r
+                LEFT JOIN dbo.fn_RolesWithPermission(@SuperPermission) s ON s.RoleId = r.Id
                 ORDER BY r.Name;
 
                 SELECT e.Id, e.FullName, d.Name AS DepartmentName, e.OrganizationId
@@ -183,14 +177,12 @@ public static class SaveUser
 
                 // Ролі: перевіряємо існування й заборону «супер-» ролей для не-супер-адміна
                 var roles = (await conn.QueryAsync<RoleCheck>(new CommandDefinition("""
-                    SELECT r.Id,
-                           CAST(CASE WHEN EXISTS (SELECT 1 FROM dbo.RolePermission rp
-                                                  JOIN dbo.Permission p ON p.Id = rp.PermissionId
-                                                  WHERE rp.RoleId = r.Id AND p.Code = @SuperPermission)
-                                     THEN 1 ELSE 0 END AS bit) AS IsSuper
+                    SELECT r.Id, CAST(CASE WHEN s.RoleId IS NULL THEN 0 ELSE 1 END AS bit) AS IsSuper
                     FROM dbo.Role r
-                    WHERE r.Id IN @roleIds
-                    """, new { roleIds, SuperPermission = Permissions.OrganizationsManage }, cancellationToken: ct))).AsList();
+                    JOIN @RoleIds x ON x.Id = r.Id
+                    LEFT JOIN dbo.fn_RolesWithPermission(@SuperPermission) s ON s.RoleId = r.Id
+                    """, new { RoleIds = SqlTvp.IdList(roleIds), SuperPermission = Permissions.OrganizationsManage },
+                    cancellationToken: ct))).AsList();
                 if (roles.Count != roleIds.Count)
                     throw Fail("roles", "Деяких ролей не знайдено");
                 if (!isSuper && roles.Any(r => r.IsSuper))
@@ -226,7 +218,7 @@ public static class SaveUser
                 OrganizationId = targetOrg,
                 d.EmployeeId,
                 d.IsActive,
-                RoleIds = string.Join(',', roleIds),
+                RoleIds = SqlTvp.IdList(roleIds),
             }, ct);
         }
     }

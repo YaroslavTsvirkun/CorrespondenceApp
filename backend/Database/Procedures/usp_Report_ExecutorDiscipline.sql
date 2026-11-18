@@ -11,16 +11,13 @@ BEGIN
 
     WITH Stats AS
     (
-        SELECT e.FullName AS Executor,
+        SELECT t.ExecutorName AS Executor,
                COUNT(*) AS Total,
-               SUM(CASE WHEN s.Name = N'Виконано' THEN 1 ELSE 0 END) AS Done
-        FROM dbo.ExecutionTask t
-        JOIN dbo.Document d   ON d.Id = t.DocumentId
-        JOIN dbo.Employee e   ON e.Id = t.ExecutorEmployeeId
-        JOIN dbo.TaskStatus s ON s.Id = t.TaskStatusId
-        WHERE (@Bypass = 1 OR d.OrganizationId = @TenantOrganizationId)
-          AND dbo.fn_CanReadDocument(d.Id, @ScopeLevel, @EmployeeId, @DepartmentId) = 1
-        GROUP BY e.FullName
+               SUM(CASE WHEN t.StatusName = N'Виконано' THEN 1 ELSE 0 END) AS Done
+        FROM dbo.vw_Task t
+        JOIN dbo.fn_VisibleDocuments(@ScopeLevel, @EmployeeId, @DepartmentId, @Bypass, @TenantOrganizationId) v
+            ON v.Id = t.DocumentId
+        GROUP BY t.ExecutorName
     )
     SELECT Executor, Total, Done, dbo.fn_Percent(Done, Total) AS [Percent]
     FROM Stats
