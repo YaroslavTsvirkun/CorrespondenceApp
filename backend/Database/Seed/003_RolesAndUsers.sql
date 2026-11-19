@@ -36,7 +36,8 @@ SELECT @registrar, Id FROM dbo.Permission WHERE Code IN (
 
 INSERT dbo.RolePermission (RoleId, PermissionId)
 SELECT @manager, Id FROM dbo.Permission WHERE Code IN (
-    N'documents.read.involved', N'documents.read.department', N'resolutions.create', N'tasks.assign',
+    N'documents.read.involved', N'documents.read.department', N'documents.update',
+    N'resolutions.create', N'tasks.assign',
     N'reports.view', N'dashboard.overview', N'dashboard.control');
 
 INSERT dbo.RolePermission (RoleId, PermissionId)
