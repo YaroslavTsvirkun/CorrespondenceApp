@@ -5,7 +5,7 @@ using Dapper;
 using FluentValidation;
 using MediatR;
 
-namespace CorrespondenceApi.Features.Documents;
+namespace CorrespondenceApi.Features;
 
 // ---- Спільний вхідний DTO для створення/редагування ----
 // Імена властивостей збігаються з параметрами процедур dbo.usp_Document_Create / _Update.
