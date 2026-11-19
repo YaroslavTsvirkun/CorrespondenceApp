@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { App, Button, Popconfirm, Space, Table, Typography, Upload } from 'antd';
-import { DeleteOutlined, DownloadOutlined, InboxOutlined, PaperClipOutlined } from '@ant-design/icons';
+import { DeleteOutlined, DownloadOutlined, EyeOutlined, InboxOutlined, PaperClipOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api, apiDownload, apiUpload } from '../api/client';
+import AttachmentViewer from './AttachmentViewer';
+import { canPreview } from './attachmentPreview';
 
 interface Attachment {
   id: number; fileName: string; contentType: string; sizeBytes: number;
@@ -11,7 +13,7 @@ interface Attachment {
 
 /** Дозволені типи файлів (дзеркало FileStorage:AllowedExtensions на бекенді). */
 const ACCEPT = [
-  '.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt', '.xls', '.xlsx', '.ods', '.csv', '.ppt', '.pptx', '.odp',
+  '.pdf', '.doc', '.docx', '.odt', '.rtf', '.txt', '.xls', '.xlsx', '.ods', '.csv', '.ppt', '.pptx', '.odp', '.html', '.htm',
   '.jpg', '.jpeg', '.png', '.tif', '.tiff', '.zip', '.7z', '.xml', '.eml', '.msg', '.p7s', '.asice', '.asics',
 ].join(',');
 
@@ -27,6 +29,7 @@ export default function AttachmentsPanel({ documentId, canEdit }: { documentId: 
   const [items, setItems] = useState<Attachment[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(0);
+  const [viewing, setViewing] = useState<Attachment | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,7 +91,7 @@ export default function AttachmentsPanel({ documentId, canEdit }: { documentId: 
             <p className="ant-upload-text">
               {uploading > 0 ? 'Завантаження…' : 'Перетягніть файли сюди або натисніть, щоб обрати'}
             </p>
-            <p className="ant-upload-hint">PDF, документи Office, зображення, архіви, файли з КЕП (.p7s, .asice)</p>
+            <p className="ant-upload-hint">PDF, документи Office, HTML, зображення, архіви, файли з КЕП (.p7s, .asice)</p>
           </Upload.Dragger>
         </div>
       )}
@@ -97,15 +100,21 @@ export default function AttachmentsPanel({ documentId, canEdit }: { documentId: 
         columns={[
           {
             title: 'Файл', dataIndex: 'fileName', ellipsis: true,
-            render: (v: string, a) => <Typography.Link onClick={() => download(a)}>{v}</Typography.Link>,
+            // Клік по імені: перегляд, якщо формат підтримується, інакше — завантаження
+            render: (v: string, a) => (
+              <Typography.Link onClick={() => (canPreview(a.fileName) ? setViewing(a) : download(a))}>{v}</Typography.Link>
+            ),
           },
           { title: 'Розмір', dataIndex: 'sizeBytes', width: 90, render: formatSize },
           { title: 'Додав', dataIndex: 'addedBy', width: 160, ellipsis: true, render: (v) => v || '—' },
           { title: 'Додано', dataIndex: 'addedAt', width: 130, render: (v) => dayjs(v).format('DD.MM.YYYY HH:mm') },
           {
-            title: '', width: 80, render: (_, a) => (
+            title: '', width: 110, render: (_, a) => (
               <Space size={4}>
-                <Button size="small" icon={<DownloadOutlined />} onClick={() => download(a)} />
+                {canPreview(a.fileName) && (
+                  <Button size="small" title="Переглянути" icon={<EyeOutlined />} onClick={() => setViewing(a)} />
+                )}
+                <Button size="small" title="Завантажити" icon={<DownloadOutlined />} onClick={() => download(a)} />
                 {canEdit && (
                   <Popconfirm title="Видалити вкладення?" okText="Так" cancelText="Ні" onConfirm={() => remove(a)}>
                     <Button size="small" danger icon={<DeleteOutlined />} />
@@ -115,6 +124,8 @@ export default function AttachmentsPanel({ documentId, canEdit }: { documentId: 
             ),
           },
         ]} />
+      <AttachmentViewer attachment={viewing} onClose={() => setViewing(null)}
+        onDownload={() => viewing && download(viewing)} />
     </>
   );
 }

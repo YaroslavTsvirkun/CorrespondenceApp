@@ -27,6 +27,7 @@ public sealed class FileStorageOptions
         ".pdf", ".doc", ".docx", ".odt", ".rtf", ".txt",
         ".xls", ".xlsx", ".ods", ".csv", ".ppt", ".pptx", ".odp",
         ".jpg", ".jpeg", ".png", ".tif", ".tiff",
+        ".html", ".htm",
         ".zip", ".7z", ".xml", ".eml", ".msg",
         // Файли з кваліфікованим електронним підписом (КЕП)
         ".p7s", ".asice", ".asics",

@@ -45,6 +45,20 @@ public static class AttachmentsEndpoints
             })
             .RequireAuthorization(Permissions.DocumentsReadAny);
 
+        // Перегляд у браузері: PDF / HTML як є, офісні документи — сконвертовані у PDF.
+        // Без Content-Disposition (inline); HTML додатково ізолюється CSP sandbox.
+        g.MapGet("/{id:int}/preview", async (ISender m, HttpContext http, int id, CancellationToken ct) =>
+            {
+                var file = await m.Send(new PreviewAttachment.Query(id), ct);
+                http.Response.Headers.XContentTypeOptions = "nosniff";
+                http.Response.Headers.ContentSecurityPolicy =
+                    "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:";
+                http.Response.Headers.CacheControl = "private, no-store";
+                http.Response.ContentLength = file.Length;
+                return Results.Stream(file.Content, file.ContentType);
+            })
+            .RequireAuthorization(Permissions.DocumentsReadAny);
+
         g.MapDelete("/{id:int}", async (ISender m, int id, CancellationToken ct) =>
             {
                 await m.Send(new DeleteAttachment.Command(id), ct);
