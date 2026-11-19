@@ -34,3 +34,26 @@ public static class DeleteAttachmentRecord
 {
     public record Command(int Id) : IRequest<IReadOnlyList<string>>;
 }
+
+/// <summary>
+/// Заміна вмісту вкладення (dbo.usp_Attachment_ReplaceContent): збереження з редактора або відновлення версії.
+/// Новий файл уже покладено у сховище під <c>StorageKey</c>; поточний вміст стає попередньою версією.
+/// Повертає попередній ключ об'єкта.
+/// </summary>
+public static class ReplaceAttachmentContent
+{
+    public record Command(int Id, string FileName, string ContentType, long SizeBytes,
+        byte[] Sha256, string StorageKey) : IRequest<string>;
+}
+
+/// <summary>Попередні версії вкладення (з перевіркою видимості документа), новіші — першими.</summary>
+public static class GetAttachmentVersions
+{
+    public record Query(int AttachmentId) : IRequest<IReadOnlyList<AttachmentVersionDto>>;
+}
+
+/// <summary>Метадані файлу попередньої версії вкладення (з перевіркою видимості документа).</summary>
+public static class GetAttachmentVersionFile
+{
+    public record Query(int AttachmentId, int VersionId) : IRequest<AttachmentFileDto>;
+}

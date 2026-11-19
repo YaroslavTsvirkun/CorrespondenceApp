@@ -17,6 +17,7 @@ using CorrespondenceApi.Features.Users;
 using CorrespondenceApi.Features.Attachments;
 using CorrespondenceApi.Infrastructure.Conversion;
 using CorrespondenceApi.Infrastructure.Cors;
+using CorrespondenceApi.Infrastructure.Editor;
 using CorrespondenceApi.Infrastructure.DataService;
 using CorrespondenceApi.Infrastructure.Storage;
 using CorrespondenceSystem.Contracts.Common;
@@ -60,6 +61,15 @@ builder.Services.AddHttpClient<IDocumentConverter, GotenbergDocumentConverter>(h
         o.Retry.ShouldHandle = _ => ValueTask.FromResult(false);
     });
 #pragma warning restore EXTEXP0001
+
+// ---- Редагування документів Word: ONLYOFFICE Docs (адреса й секрет — з Aspire AppHost) ----
+var editorOptions = builder.Configuration.GetSection("DocumentEditor").Get<DocumentEditorOptions>()
+                    ?? new DocumentEditorOptions();
+builder.Services.AddSingleton(editorOptions);
+builder.Services.AddSingleton<OnlyOfficeJwt>();
+builder.Services.AddScoped<DocumentEditorService>();
+builder.Services.AddScoped<AttachmentContentService>();
+builder.Services.AddHttpClient("onlyoffice-download"); // збережений файл з Document Server
 
 // Локальні хендлери backend (вхід, вкладення) + валідація запитів до пересилання в сервіс даних
 builder.Services.AddMediatR(cfg =>

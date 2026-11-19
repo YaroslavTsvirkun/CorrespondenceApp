@@ -1,4 +1,6 @@
+using System.Security.Claims;
 using CorrespondenceApi.Infrastructure.Storage;
+using CorrespondenceApi.Features.Attachments;
 using CorrespondenceSystem.Contracts.Attachments;
 using CorrespondenceSystem.Contracts.Common;
 using MediatR;
@@ -65,5 +67,58 @@ public static class AttachmentsEndpoints
                 return Results.NoContent();
             })
             .RequireAuthorization(Permissions.DocumentsUpdate);
+
+        // ---- Редагування (ONLYOFFICE Docs): конфігурація редактора для браузера ----
+        // Режим редагування — лише з правом documents.update, інакше документ відкривається для читання.
+        g.MapGet("/{id:int}/editor", async (DocumentEditorService editor, ClaimsPrincipal user, int id,
+                CancellationToken ct) =>
+            {
+                var userId = int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+                var name = user.FindFirstValue("fullName") ?? user.Identity?.Name ?? "";
+                var canEdit = user.HasClaim("permission", Permissions.DocumentsUpdate);
+                return Results.Ok(await editor.GetConfigAsync(id, userId, name, canEdit, ct));
+            })
+            .RequireAuthorization(Permissions.DocumentsReadAny);
+
+        // ---- Версії вмісту (після редагування) ----
+        g.MapGet("/{id:int}/versions", async (ISender m, int id, CancellationToken ct) =>
+                Results.Ok(await m.Send(new GetAttachmentVersions.Query(id), ct)))
+            .RequireAuthorization(Permissions.DocumentsReadAny);
+
+        g.MapGet("/{id:int}/versions/{versionId:int}/content", async (ISender m, HttpContext http, int id,
+                int versionId, CancellationToken ct) =>
+            {
+                var file = await m.Send(new DownloadAttachmentVersion.Query(id, versionId), ct);
+                http.Response.Headers.XContentTypeOptions = "nosniff";
+                http.Response.ContentLength = file.Length;
+                return Results.File(file.Content, file.ContentType, file.FileName);
+            })
+            .RequireAuthorization(Permissions.DocumentsReadAny);
+
+        g.MapPost("/{id:int}/versions/{versionId:int}/restore", async (ISender m, ClaimsPrincipal user, int id,
+                int versionId, CancellationToken ct) =>
+            {
+                var userId = int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+                await m.Send(new RestoreAttachmentVersion.Command(id, versionId, userId), ct);
+                return Results.NoContent();
+            })
+            .RequireAuthorization(Permissions.DocumentsUpdate);
+
+        // ---- Виклики від Document Server (без JWT користувача; доступ — за підписаним посиланням) ----
+        var editorApi = app.MapGroup("/api/editor/attachments").WithTags("Document editor").AllowAnonymous();
+
+        editorApi.MapGet("/{id:int}/file", async (DocumentEditorService editor, HttpContext http, int id,
+                [FromQuery(Name = "t")] string? token, CancellationToken ct) =>
+            {
+                var file = await editor.OpenFileAsync(id, token, ct);
+                http.Response.ContentLength = file.Length;
+                return Results.Stream(file.Content, file.ContentType);
+            });
+
+        // Відповідь завжди { error: 0 | 1 } — так вимагає протокол ONLYOFFICE
+        editorApi.MapPost("/{id:int}/callback", async (DocumentEditorService editor, HttpRequest request, int id,
+                [FromQuery(Name = "t")] string? token, CancellationToken ct) =>
+                Results.Json(new { error = await editor.HandleCallbackAsync(id, token, request, ct) }))
+            .DisableAntiforgery();
     }
 }

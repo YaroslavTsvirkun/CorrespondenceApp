@@ -18,6 +18,20 @@ var gotenberg = builder.AddContainer("gotenberg", "gotenberg/gotenberg", "8.38.1
     .WithHttpHealthCheck("/health", endpointName: "http")
     .WithLifetime(ContainerLifetime.Persistent);
 
+// Онлайн-редактор документів Word (DOC/DOCX) — ONLYOFFICE Docs Community Edition.
+// Браузер вантажить редактор напряму з контейнера; сам Document Server звертається до backend
+// (файл і callback збереження) через host.docker.internal. Запити підписуються спільним JWT-секретом.
+var editorJwtSecret = builder.AddParameter("onlyoffice-jwt-secret",
+    new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
+var onlyoffice = builder.AddContainer("onlyoffice", "onlyoffice/documentserver", "9.4.0.1")
+    .WithHttpEndpoint(targetPort: 80, name: "http")
+    .WithEnvironment("JWT_ENABLED", "true")
+    .WithEnvironment("JWT_SECRET", editorJwtSecret)
+    // backend на хості має приватну адресу (host.docker.internal) — інакше Document Server її блокує
+    .WithEnvironment("ALLOW_PRIVATE_IP_ADDRESS", "true")
+    .WithHttpHealthCheck("/healthcheck", endpointName: "http")
+    .WithLifetime(ContainerLifetime.Persistent);
+
 // Спільний секрет для викликів backend -> dataservice (генерується й зберігається в user secrets AppHost).
 var dataApiKey = builder.AddParameter("data-api-key",
     new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
@@ -40,6 +54,9 @@ var backend = builder.AddDotnetProject("backend", "../backend/CorrespondenceApi.
     .WaitFor(minio)
     .WithReference(gotenberg.GetEndpoint("http"))
     .WaitFor(gotenberg)
+    .WithEnvironment("DocumentEditor__PublicUrl", onlyoffice.GetEndpoint("http"))
+    .WithEnvironment("DocumentEditor__JwtSecret", editorJwtSecret)
+    .WaitFor(onlyoffice)
     .WithHttpHealthCheck("/health")
     .WithExternalHttpEndpoints();
 
