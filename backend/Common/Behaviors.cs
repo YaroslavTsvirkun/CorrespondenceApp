@@ -1,4 +1,5 @@
 using System.Net.Mime;
+using CorrespondenceApi.Infrastructure.Conversion;
 using CorrespondenceApi.Infrastructure.DataService;
 using CorrespondenceSystem.Contracts.Common;
 using FluentValidation;
@@ -37,6 +38,16 @@ public class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger) : IE
             case UnauthorizedException ue:
                 ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 await ctx.Response.WriteAsJsonAsync(new { title = ue.Message, status = 401 }, ct);
+                return true;
+
+            case DocumentConversionException ce:
+                logger.LogError(ex, "Помилка конвертації документа для перегляду");
+                ctx.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;
+                await ctx.Response.WriteAsJsonAsync(new
+                {
+                    title = ce.InnerException is null ? "Не вдалося підготувати документ до перегляду" : ce.Message,
+                    status = 422,
+                }, ct);
                 return true;
 
             case DataApiException { StatusCode: var code } de when (int)code is >= 400 and < 500:

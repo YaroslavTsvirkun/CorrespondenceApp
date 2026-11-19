@@ -10,6 +10,14 @@ var minio = builder.AddMinioContainer("minio")
     .WithDataVolume("correspondence-minio-data")
     .WithLifetime(ContainerLifetime.Persistent);
 
+// Конвертер документів для перегляду вкладень (DOC/DOCX/XLS/XLSX… -> PDF): Gotenberg з LibreOffice.
+// Назовні не публікується, викликається лише backend (service discovery: http://gotenberg).
+var gotenberg = builder.AddContainer("gotenberg", "gotenberg/gotenberg", "8.38.1-libreoffice")
+    .WithHttpEndpoint(targetPort: 3000, name: "http")
+    .WithArgs("gotenberg", "--api-timeout=120s", "--libreoffice-restart-after=50")
+    .WithHttpHealthCheck("/health", endpointName: "http")
+    .WithLifetime(ContainerLifetime.Persistent);
+
 // Спільний секрет для викликів backend -> dataservice (генерується й зберігається в user secrets AppHost).
 var dataApiKey = builder.AddParameter("data-api-key",
     new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
@@ -30,6 +38,8 @@ var backend = builder.AddDotnetProject("backend", "../backend/CorrespondenceApi.
     .WithEnvironment("DataApi__ApiKey", dataApiKey)
     .WithReference(minio)
     .WaitFor(minio)
+    .WithReference(gotenberg.GetEndpoint("http"))
+    .WaitFor(gotenberg)
     .WithHttpHealthCheck("/health")
     .WithExternalHttpEndpoints();
 

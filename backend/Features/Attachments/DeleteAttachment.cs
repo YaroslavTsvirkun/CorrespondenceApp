@@ -25,7 +25,8 @@ public static class AttachmentCleanup
 {
     public static async Task DeleteObjectsAsync(IFileStorage storage, IEnumerable<string> keys, ILogger logger)
     {
-        foreach (var key in keys)
+        // Разом з оригіналом — PDF-копія для перегляду (якщо була створена)
+        foreach (var key in keys.SelectMany(k => new[] { k, PreviewAttachment.PreviewKey(k) }))
         {
             // Запис у БД уже видалено: збій сховища не повинен ламати операцію користувача
             try { await storage.DeleteAsync(key, CancellationToken.None); }

@@ -21,6 +21,12 @@ export async function apiUpload<T = unknown>(path: string, form: FormData): Prom
   return (res.status === 204 ? null : await res.json()) as T;
 }
 
+/** Отримання файлу з бекенда (з JWT) як Blob — для перегляду в браузері. */
+export async function apiBlob(path: string, signal?: AbortSignal): Promise<Blob> {
+  const res = await send(path, { signal });
+  return res.blob();
+}
+
 /** Скачування файлу з бекенда (з JWT) і збереження через браузер. */
 export async function apiDownload(path: string, fileName: string): Promise<void> {
   const res = await send(path);

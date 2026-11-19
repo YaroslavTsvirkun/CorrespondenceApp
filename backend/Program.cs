@@ -15,6 +15,7 @@ using CorrespondenceApi.Features.Settings;
 using CorrespondenceApi.Features.Tasks;
 using CorrespondenceApi.Features.Users;
 using CorrespondenceApi.Features.Attachments;
+using CorrespondenceApi.Infrastructure.Conversion;
 using CorrespondenceApi.Infrastructure.Cors;
 using CorrespondenceApi.Infrastructure.DataService;
 using CorrespondenceApi.Infrastructure.Storage;
@@ -41,6 +42,24 @@ storageOptions.ApplyConnectionString(builder.Configuration.GetConnectionString(F
 builder.Services.AddSingleton(storageOptions);
 builder.Services.AddSingleton<IFileStorage, S3FileStorage>();
 builder.Services.AddHealthChecks().AddCheck<FileStorageHealthCheck>("file-storage", tags: ["ready"]);
+
+// ---- Перегляд вкладень: конвертація DOC/DOCX/XLS/XLSX… у PDF (Gotenberg з Aspire AppHost) ----
+var conversionOptions = builder.Configuration.GetSection("DocumentConversion").Get<DocumentConversionOptions>()
+                        ?? new DocumentConversionOptions();
+#pragma warning disable EXTEXP0001 // RemoveAllResilienceHandlers — експериментальний API
+builder.Services.AddHttpClient<IDocumentConverter, GotenbergDocumentConverter>(http =>
+        http.BaseAddress = new Uri(conversionOptions.BaseUrl))
+    .RemoveAllResilienceHandlers() // замість стандартного з ServiceDefaults (30 с, повтори)
+    .AddStandardResilienceHandler(o =>
+    {
+        // Конвертація великих документів триває довше за стандартні 30 с; POST не повторюємо
+        var timeout = TimeSpan.FromSeconds(conversionOptions.TimeoutSeconds);
+        o.AttemptTimeout.Timeout = timeout;
+        o.TotalRequestTimeout.Timeout = timeout + TimeSpan.FromSeconds(5);
+        o.CircuitBreaker.SamplingDuration = timeout * 2;
+        o.Retry.ShouldHandle = _ => ValueTask.FromResult(false);
+    });
+#pragma warning restore EXTEXP0001
 
 // Локальні хендлери backend (вхід, вкладення) + валідація запитів до пересилання в сервіс даних
 builder.Services.AddMediatR(cfg =>
