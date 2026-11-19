@@ -144,7 +144,7 @@ Inline TVF оптимізатор вбудовує в план як підзап
   `DocumentFilter("d")` (один документ), `TenantFilter("x")`.
 * `SqlTvp` — табличні параметри `IdList`, `CodeList`, `TaskAssignments`.
 * `DateOnlyTypeHandler` — підтримка `DateOnly` для колонок `date`.
-* Хендлери MediatR (Vertical Slice, `Features/*.cs`) виконують параметризований SQL або
+* Хендлери MediatR (Vertical Slice, `Features/<Фіча>/<Слайс>.cs`, DTO — у `Features/<Фіча>/Dtos/`) виконують параметризований SQL або
   викликають процедури; DTO-записи мапляться Dapper за конструктором (порядок і імена
   колонок у `SELECT` збігаються з параметрами запису).
 
