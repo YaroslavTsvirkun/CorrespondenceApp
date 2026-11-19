@@ -12,6 +12,7 @@ import dayjs from 'dayjs';
 import { api } from '../api/client';
 import { useLookups, opt } from '../data/lookups';
 import { useAuth, P } from '../auth/AuthContext';
+import AttachmentsPanel from '../components/AttachmentsPanel';
 
 export function statusColor(name: string): string {
   switch (name) {
@@ -256,6 +257,7 @@ export default function DocumentsPage() {
       <Drawer open={!!viewing} size="large" onClose={() => setViewing(null)}
         title={viewing ? `Картка документа № ${viewing.registrationNumber}` : ''}>
         {viewing && <DocCard d={viewing} />}
+        {viewing && <AttachmentsPanel documentId={viewing.id as number} canEdit={can(P.docsUpdate)} />}
       </Drawer>
     </>
   );

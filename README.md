@@ -25,6 +25,15 @@ URL, логами та трасуванням. Фронтенд звертаєт
 > функції, процедури, тригери і тестові дані розгортаються автоматично під час старту бекенда
 > з директорії `backend/Database/` (див. [docs/DATABASE.md](docs/DATABASE.md)).
 
+### Файлове сховище вкладень (MinIO)
+Вкладення документів зберігаються в S3-сумісному **MinIO**, який AppHost запускає в контейнері
+(потрібен запущений **Docker**). Використовується спільнотна збірка `pgsty/minio` — офіційні образи
+`minio/minio` більше не публікуються. Дані — в томі `correspondence-minio-data`, бакет `correspondence`
+створюється автоматично. У БД (`dbo.Attachment`) зберігаються лише метадані та ключ об'єкта.
+Налаштування — секція `FileStorage` в `appsettings.json` (`Bucket`, `MaxFileSizeMb`, `AllowedExtensions`);
+рядок підключення `ConnectionStrings:minio` (`Endpoint=…;AccessKey=…;SecretKey=…`) під Aspire
+передається автоматично, для окремого запуску бекенда його треба задати вручну.
+
 ### Окремий запуск (без Aspire)
 `backend`: `dotnet run` (→ `http://localhost:5080`, Swagger `/swagger`).
 `frontend`: `npm install && npm run dev` (→ `http://localhost:5180`, проксі на :5080).
