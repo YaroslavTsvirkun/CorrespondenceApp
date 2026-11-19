@@ -6,7 +6,7 @@ using FluentValidation;
 using MediatR;
 using Microsoft.AspNetCore.Authentication;
 
-namespace CorrespondenceApi.Features.Auth;
+namespace CorrespondenceApi.Features;
 
 public record UserInfo(
     int UserId, string UserName, string FullName, int? EmployeeId, int? DepartmentId,
