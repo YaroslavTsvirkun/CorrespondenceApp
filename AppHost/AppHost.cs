@@ -10,10 +10,24 @@ var minio = builder.AddMinioContainer("minio")
     .WithDataVolume("correspondence-minio-data")
     .WithLifetime(ContainerLifetime.Persistent);
 
-// Бекенд (ASP.NET Core API, Dapper). Працює з MS SQL Server LocalDB через рядок підключення;
-// під час старту сам розгортає SQL-код із backend/Database (схема, функції, процедури, тригери, дані).
+// Спільний секрет для викликів backend -> dataservice (генерується й зберігається в user secrets AppHost).
+var dataApiKey = builder.AddParameter("data-api-key",
+    new GenerateParameterDefault { MinLength = 32, Special = false }, secret: true, persist: true);
+
+// Сервіс даних (ASP.NET Core, Dapper) — єдиний компонент із доступом до MS SQL Server LocalDB.
+// Під час старту сам розгортає SQL-код із dataservice/Database (схема, функції, процедури, тригери, дані).
+// Назовні не публікується: його викликає лише backend через внутрішній Data API (POST /rpc/{операція}).
+var dataservice = builder.AddDotnetProject("dataservice", "../dataservice/CorrespondenceSystem.DataService.csproj")
+    .WithEnvironment("DataApi__ApiKey", dataApiKey)
+    .WithHttpHealthCheck("/health");
+
+// Бекенд (ASP.NET Core API): автентифікація (JWT), авторизація, файли вкладень у MinIO.
+// Дані читає й пише через сервіс даних (адреса — service discovery, ключ — DataApi__ApiKey).
 // Рядок підключення до MinIO приходить як ConnectionStrings__minio.
 var backend = builder.AddDotnetProject("backend", "../backend/CorrespondenceApi.csproj")
+    .WithReference(dataservice)
+    .WaitFor(dataservice)
+    .WithEnvironment("DataApi__ApiKey", dataApiKey)
     .WithReference(minio)
     .WaitFor(minio)
     .WithHttpHealthCheck("/health")

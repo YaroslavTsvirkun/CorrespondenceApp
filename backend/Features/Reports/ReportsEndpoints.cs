@@ -1,4 +1,5 @@
-using CorrespondenceApi.Common;
+using CorrespondenceSystem.Contracts.Common;
+using CorrespondenceSystem.Contracts.Reports;
 using MediatR;
 
 namespace CorrespondenceApi.Features.Reports;

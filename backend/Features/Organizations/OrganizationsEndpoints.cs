@@ -1,5 +1,6 @@
-using CorrespondenceApi.Common;
-using CorrespondenceApi.Features.Organizations.Dtos;
+using CorrespondenceSystem.Contracts.Common;
+using CorrespondenceSystem.Contracts.Organizations;
+using CorrespondenceSystem.Contracts.Organizations.Dtos;
 using MediatR;
 
 namespace CorrespondenceApi.Features.Organizations;

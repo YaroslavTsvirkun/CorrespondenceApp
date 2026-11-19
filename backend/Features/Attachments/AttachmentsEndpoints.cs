@@ -1,5 +1,6 @@
-using CorrespondenceApi.Common;
 using CorrespondenceApi.Infrastructure.Storage;
+using CorrespondenceSystem.Contracts.Attachments;
+using CorrespondenceSystem.Contracts.Common;
 using MediatR;
 using Microsoft.AspNetCore.Mvc;
 

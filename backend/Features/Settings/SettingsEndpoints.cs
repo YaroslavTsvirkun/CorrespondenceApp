@@ -1,7 +1,6 @@
-using CorrespondenceApi.Common;
-using CorrespondenceApi.Features.Settings.Dtos;
-using FluentValidation;
-using FluentValidation.Results;
+using CorrespondenceSystem.Contracts.Common;
+using CorrespondenceSystem.Contracts.Settings;
+using CorrespondenceSystem.Contracts.Settings.Dtos;
 using MediatR;
 
 namespace CorrespondenceApi.Features.Settings;
@@ -26,8 +25,4 @@ public static class SettingsEndpoints
             return Results.NoContent();
         });
     }
-
-    internal static int RequireOrg(ICurrentUser user) =>
-        user.OrganizationId ?? throw new ValidationException([new ValidationFailure("organization",
-            "Супер-адміністратор не прив'язаний до організації — задайте патерн у картці організації")]);
 }

@@ -3,12 +3,12 @@
 Бекенд працює з MS SQL Server через **Dapper** (`Microsoft.Data.SqlClient`).
 Структура БД і серверна логіка (скалярні та табличні функції, представлення,
 табличні типи, збережені процедури, тригери)
-зберігаються як SQL-файли в `backend/Database/` і **автоматично розгортаються** в БД
+зберігаються як SQL-файли в `dataservice/Database/` і **автоматично розгортаються** в БД
 під час старту застосунку.
 
 ## Автоматичне розгортання
 
-Клас `backend/Infrastructure/Database/SqlScriptDeployer.cs`:
+Клас `dataservice/Infrastructure/Database/SqlScriptDeployer.cs`:
 
 1. Створює базу даних з рядка підключення `ConnectionStrings:Default`, якщо її ще немає.
 2. Створює журнал `dbo.__SchemaVersions` (ім'я скрипта, SHA-256, дата застосування).
@@ -38,7 +38,7 @@
 * SQL-файли копіюються у вихідну директорію збірки/публікації (`CorrespondenceApi.csproj`),
   тому розгортання працює і з опублікованого застосунку.
 
-Налаштування (`backend/appsettings.json`):
+Налаштування (`dataservice/appsettings.json`):
 
 ```json
 "Database": {
@@ -48,7 +48,7 @@
 }
 ```
 
-Лише розгорнути БД без запуску API: `dotnet run -- --deploy-db` (у директорії `backend`).
+Лише розгорнути БД без запуску API: `dotnet run -- --deploy-db` (у директорії `dataservice`).
 
 **Сумісність зі старою БД (EF Core).** `Schema/001_Tables.sql` створює кожну таблицю лише
 якщо її немає, а seed-скрипти пропускаються для непорожніх таблиць. Тому БД, створена
