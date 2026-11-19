@@ -19,6 +19,12 @@ BEGIN
 
     DECLARE @Keys TABLE (StorageKey nvarchar(500));
     INSERT @Keys (StorageKey) SELECT StorageKey FROM dbo.Attachment WHERE DocumentId = @Id;
+    -- Файли попередніх версій вкладень (рядки видаляються каскадно)
+    INSERT @Keys (StorageKey)
+    SELECT v.StorageKey
+    FROM dbo.AttachmentVersion v
+    JOIN dbo.Attachment a ON a.Id = v.AttachmentId
+    WHERE a.DocumentId = @Id;
 
     DELETE dbo.Document WHERE Id = @Id;
 

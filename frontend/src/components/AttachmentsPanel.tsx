@@ -1,14 +1,19 @@
 import { useCallback, useEffect, useState } from 'react';
 import { App, Button, Popconfirm, Space, Table, Typography, Upload } from 'antd';
-import { DeleteOutlined, DownloadOutlined, EyeOutlined, InboxOutlined, PaperClipOutlined } from '@ant-design/icons';
+import {
+  DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, HistoryOutlined, InboxOutlined, PaperClipOutlined,
+} from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api, apiDownload, apiUpload } from '../api/client';
 import AttachmentViewer from './AttachmentViewer';
-import { canPreview } from './attachmentPreview';
+import AttachmentVersions from './AttachmentVersions';
+import DocumentEditor from './DocumentEditor';
+import { canEditInBrowser, canPreview, formatSize } from './attachmentPreview';
 
 interface Attachment {
   id: number; fileName: string; contentType: string; sizeBytes: number;
   addedAt: string; addedBy?: string; description?: string;
+  modifiedAt?: string; modifiedBy?: string; versionCount: number;
 }
 
 /** Дозволені типи файлів (дзеркало FileStorage:AllowedExtensions на бекенді). */
@@ -17,19 +22,15 @@ const ACCEPT = [
   '.jpg', '.jpeg', '.png', '.tif', '.tiff', '.zip', '.7z', '.xml', '.eml', '.msg', '.p7s', '.asice', '.asics',
 ].join(',');
 
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} Б`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
-}
-
-/** Вкладення документа: список, завантаження (drag-and-drop), скачування, видалення. */
+/** Вкладення документа: список, завантаження (drag-and-drop), перегляд, редагування Word, версії, видалення. */
 export default function AttachmentsPanel({ documentId, canEdit }: { documentId: number; canEdit: boolean }) {
   const { message } = App.useApp();
   const [items, setItems] = useState<Attachment[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(0);
   const [viewing, setViewing] = useState<Attachment | null>(null);
+  const [editing, setEditing] = useState<Attachment | null>(null);
+  const [history, setHistory] = useState<Attachment | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -67,6 +68,15 @@ export default function AttachmentsPanel({ documentId, canEdit }: { documentId: 
     }
   };
 
+  // Document Server зберігає файл через ~10 с після закриття редактора — оновлюємо список із затримкою
+  const editorClosed = (changed: boolean) => {
+    setEditing(null);
+    if (!changed) return;
+    message.info('Зміни зберігаються — список вкладень оновиться за кілька секунд');
+    setTimeout(() => void load(), 12_000);
+    setTimeout(() => void load(), 30_000);
+  };
+
   const remove = async (a: Attachment) => {
     try {
       await api(`/api/attachments/${a.id}`, { method: 'DELETE' });
@@ -102,17 +112,31 @@ export default function AttachmentsPanel({ documentId, canEdit }: { documentId: 
             title: 'Файл', dataIndex: 'fileName', ellipsis: true,
             // Клік по імені: перегляд, якщо формат підтримується, інакше — завантаження
             render: (v: string, a) => (
-              <Typography.Link onClick={() => (canPreview(a.fileName) ? setViewing(a) : download(a))}>{v}</Typography.Link>
+              <>
+                <Typography.Link onClick={() => (canPreview(a.fileName) ? setViewing(a) : download(a))}>{v}</Typography.Link>
+                {a.modifiedAt && (
+                  <Typography.Text type="secondary" style={{ display: 'block', fontSize: 12 }}>
+                    змінено {dayjs(a.modifiedAt).format('DD.MM.YYYY HH:mm')}{a.modifiedBy ? `, ${a.modifiedBy}` : ''}
+                  </Typography.Text>
+                )}
+              </>
             ),
           },
           { title: 'Розмір', dataIndex: 'sizeBytes', width: 90, render: formatSize },
           { title: 'Додав', dataIndex: 'addedBy', width: 160, ellipsis: true, render: (v) => v || '—' },
           { title: 'Додано', dataIndex: 'addedAt', width: 130, render: (v) => dayjs(v).format('DD.MM.YYYY HH:mm') },
           {
-            title: '', width: 110, render: (_, a) => (
+            title: '', width: 160, render: (_, a) => (
               <Space size={4}>
                 {canPreview(a.fileName) && (
                   <Button size="small" title="Переглянути" icon={<EyeOutlined />} onClick={() => setViewing(a)} />
+                )}
+                {canEdit && canEditInBrowser(a.fileName) && (
+                  <Button size="small" title="Редагувати" icon={<EditOutlined />} onClick={() => setEditing(a)} />
+                )}
+                {a.versionCount > 0 && (
+                  <Button size="small" title={`Попередні версії (${a.versionCount})`} icon={<HistoryOutlined />}
+                    onClick={() => setHistory(a)} />
                 )}
                 <Button size="small" title="Завантажити" icon={<DownloadOutlined />} onClick={() => download(a)} />
                 {canEdit && (
@@ -126,6 +150,9 @@ export default function AttachmentsPanel({ documentId, canEdit }: { documentId: 
         ]} />
       <AttachmentViewer attachment={viewing} onClose={() => setViewing(null)}
         onDownload={() => viewing && download(viewing)} />
+      <DocumentEditor attachment={editing} onClose={editorClosed} />
+      <AttachmentVersions attachment={history} canEdit={canEdit} onClose={() => setHistory(null)}
+        onRestored={() => void load()} />
     </>
   );
 }

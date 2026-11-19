@@ -52,7 +52,7 @@ public sealed class GetAttachmentFileHandler(Db db, ICurrentUser user)
         p.Add("Id", q.Id);
         return await db.QuerySingleOrDefaultAsync<AttachmentFileDto>(
             $"""
-            SELECT a.FileName, a.ContentType, a.StorageKey
+            SELECT a.FileName, a.ContentType, a.StorageKey, d.OrganizationId
             FROM dbo.Attachment a
             JOIN dbo.Document d ON d.Id = a.DocumentId
             WHERE a.Id = @Id AND {SqlScope.DocumentFilter("d")}

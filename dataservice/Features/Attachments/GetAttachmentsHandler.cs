@@ -22,9 +22,12 @@ public sealed class GetAttachmentsHandler(Db db, ICurrentUser user)
             WHERE d.Id = @DocumentId AND {SqlScope.DocumentFilter("d")};
 
             SELECT a.Id, a.FileName, a.ContentType, a.SizeBytes, TODATETIMEOFFSET(a.AddedAt, 0) AS AddedAt,
-                   e.FullName AS AddedBy, a.Description
+                   e.FullName AS AddedBy, a.Description,
+                   TODATETIMEOFFSET(a.ModifiedAt, 0) AS ModifiedAt, m.FullName AS ModifiedBy,
+                   (SELECT COUNT(*) FROM dbo.AttachmentVersion v WHERE v.AttachmentId = a.Id) AS VersionCount
             FROM dbo.Attachment a
             LEFT JOIN dbo.Employee e ON e.Id = a.AddedByEmployeeId
+            LEFT JOIN dbo.Employee m ON m.Id = a.ModifiedByEmployeeId
             WHERE a.DocumentId = @DocumentId
             ORDER BY a.AddedAt, a.Id;
             """;
