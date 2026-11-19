@@ -1,3 +1,4 @@
+using CorrespondenceSystem.Contracts.Lookups;
 using MediatR;
 
 namespace CorrespondenceApi.Features.Lookups;

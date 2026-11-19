@@ -1,5 +1,6 @@
-using CorrespondenceApi.Common;
-using CorrespondenceApi.Features.Access.Dtos;
+using CorrespondenceSystem.Contracts.Access;
+using CorrespondenceSystem.Contracts.Access.Dtos;
+using CorrespondenceSystem.Contracts.Common;
 using MediatR;
 
 namespace CorrespondenceApi.Features.Access;

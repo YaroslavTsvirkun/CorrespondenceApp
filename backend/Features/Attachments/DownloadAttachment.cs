@@ -1,37 +1,26 @@
-using CorrespondenceApi.Common;
-using CorrespondenceApi.Infrastructure.Database;
 using CorrespondenceApi.Infrastructure.Storage;
+using CorrespondenceSystem.Contracts.Attachments;
+using CorrespondenceSystem.Contracts.Common;
 using MediatR;
 
 namespace CorrespondenceApi.Features.Attachments;
 
-/// <summary>Слайс: вміст вкладення (потік зі сховища + метадані для Content-Disposition).</summary>
+/// <summary>Слайс: вміст вкладення (метадані — із сервісу даних, потік — зі сховища).</summary>
 public static class DownloadAttachment
 {
     public record Query(int Id) : IRequest<Result>;
 
     public sealed record Result(Stream Content, long Length, string FileName, string ContentType);
 
-    private sealed record Row(string FileName, string ContentType, string StorageKey);
-
-    public class Handler(Db db, ICurrentUser user, IFileStorage storage) : IRequestHandler<Query, Result>
+    public class Handler(ISender sender, IFileStorage storage) : IRequestHandler<Query, Result>
     {
         public async Task<Result> Handle(Query q, CancellationToken ct)
         {
-            var p = SqlScope.Documents(user);
-            p.Add("Id", q.Id);
-            var row = await db.QuerySingleOrDefaultAsync<Row>(
-                $"""
-                SELECT a.FileName, a.ContentType, a.StorageKey
-                FROM dbo.Attachment a
-                JOIN dbo.Document d ON d.Id = a.DocumentId
-                WHERE a.Id = @Id AND {SqlScope.DocumentFilter("d")}
-                """, p, ct) ?? throw new NotFoundException($"Вкладення #{q.Id} не знайдено");
-
+            var file = await sender.Send(new GetAttachmentFile.Query(q.Id), ct);
             try
             {
-                var obj = await storage.OpenReadAsync(row.StorageKey, ct);
-                return new Result(obj.Content, obj.Length, row.FileName, row.ContentType);
+                var obj = await storage.OpenReadAsync(file.StorageKey, ct);
+                return new Result(obj.Content, obj.Length, file.FileName, file.ContentType);
             }
             catch (FileNotFoundException)
             {

@@ -1,15 +1,15 @@
 using System.Security.Cryptography;
-using CorrespondenceApi.Common;
-using CorrespondenceApi.Infrastructure.Database;
 using CorrespondenceApi.Infrastructure.Storage;
+using CorrespondenceSystem.Contracts.Attachments;
 using FluentValidation;
 using MediatR;
 
 namespace CorrespondenceApi.Features.Attachments;
 
 /// <summary>
-/// Слайс: завантаження вкладення. Спочатку файл кладеться у сховище під згенерованим ключем,
-/// потім реєструється в БД (dbo.usp_Attachment_Create); якщо запис у БД не вдався — об'єкт видаляється.
+/// Слайс: завантаження вкладення. Сервіс даних перевіряє доступ до документа, файл кладеться у сховище
+/// під згенерованим ключем, потім реєструється в БД (dbo.usp_Attachment_Create);
+/// якщо реєстрація не вдалася — об'єкт видаляється.
 /// </summary>
 public static class UploadAttachment
 {
@@ -36,17 +36,13 @@ public static class UploadAttachment
         }
     }
 
-    public class Handler(Db db, ICurrentUser user, IFileStorage storage, ILogger<Handler> logger)
+    public class Handler(ISender sender, IFileStorage storage, ILogger<Handler> logger)
         : IRequestHandler<Command, int>
     {
         public async Task<int> Handle(Command c, CancellationToken ct)
         {
             // Документ має існувати й бути доступним — перевіряємо до завантаження байтів у сховище
-            var p = SqlScope.Documents(user);
-            p.Add("DocumentId", c.DocumentId);
-            var organizationId = await db.QuerySingleOrDefaultAsync<int?>(
-                $"SELECT d.OrganizationId FROM dbo.Document d WHERE d.Id = @DocumentId AND {SqlScope.DocumentFilter("d")}",
-                p, ct) ?? throw new NotFoundException($"Документ #{c.DocumentId} не знайдено");
+            var organizationId = await sender.Send(new PrepareAttachmentUpload.Query(c.DocumentId), ct);
 
             var fileName = AttachmentFiles.SafeFileName(c.File.FileName);
             var contentType = AttachmentFiles.ContentTypeFor(fileName);
@@ -60,16 +56,8 @@ public static class UploadAttachment
 
             try
             {
-                var tp = SqlScope.Tenant(user);
-                tp.Add("DocumentId", c.DocumentId);
-                tp.Add("FileName", fileName);
-                tp.Add("ContentType", contentType);
-                tp.Add("SizeBytes", c.File.Length);
-                tp.Add("Sha256", sha256);
-                tp.Add("StorageKey", key);
-                tp.Add("Description", c.Description);
-                tp.Add("AddedByEmployeeId", user.EmployeeId);
-                return await db.ScalarProcAsync<int>("dbo.usp_Attachment_Create", tp, ct);
+                return await sender.Send(new RegisterAttachment.Command(
+                    c.DocumentId, fileName, contentType, c.File.Length, sha256, key, c.Description), ct);
             }
             catch
             {

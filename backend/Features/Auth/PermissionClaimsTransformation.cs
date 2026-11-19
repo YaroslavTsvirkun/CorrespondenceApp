@@ -1,14 +1,17 @@
+using System.Net;
 using System.Security.Claims;
-using CorrespondenceApi.Infrastructure.Database;
+using CorrespondenceApi.Infrastructure.DataService;
+using CorrespondenceSystem.Contracts.Auth;
+using CorrespondenceSystem.Contracts.Auth.Dtos;
 using Microsoft.AspNetCore.Authentication;
 
 namespace CorrespondenceApi.Features.Auth;
 
 /// <summary>
-/// Динамічні права: на кожен запит вантажимо актуальні пермішени користувача з БД
+/// Динамічні права: на кожен запит отримуємо актуальні пермішени користувача із сервісу даних
 /// і додаємо їх до принципала (зміни прав діють одразу, без перевидання токена).
 /// </summary>
-public class PermissionClaimsTransformation(Db db) : IClaimsTransformation
+public class PermissionClaimsTransformation(DataApiClient dataApi, IHttpContextAccessor accessor) : IClaimsTransformation
 {
     public async Task<ClaimsPrincipal> TransformAsync(ClaimsPrincipal principal)
     {
@@ -19,15 +22,23 @@ public class PermissionClaimsTransformation(Db db) : IClaimsTransformation
         if (!int.TryParse(principal.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var userId))
             return principal;
 
-        var access = await UserAccess.LoadAsync(db, userId, null, CancellationToken.None);
-        if (access is null || !access.User.IsActive) return principal;
+        var ct = accessor.HttpContext?.RequestAborted ?? CancellationToken.None;
+        UserInfo user;
+        try
+        {
+            // Принципал ще не встановлено в HttpContext — користувача передаємо явно
+            user = await dataApi.SendAsync(new Me.Query(), userId, ct);
+        }
+        catch (DataApiException e) when (e.StatusCode == HttpStatusCode.Unauthorized)
+        {
+            return principal; // користувача видалено або деактивовано — без пермішенів
+        }
 
         identity.AddClaim(new Claim("perm_loaded", "1"));
-        var u = access.User;
-        if (u.EmployeeId is int eid) identity.AddClaim(new Claim("employeeId", eid.ToString()));
-        if (u.DepartmentId is int did) identity.AddClaim(new Claim("departmentId", did.ToString()));
-        if (u.OrganizationId is int orgId) identity.AddClaim(new Claim("organizationId", orgId.ToString()));
-        foreach (var code in access.Permissions)
+        if (user.EmployeeId is int eid) identity.AddClaim(new Claim("employeeId", eid.ToString()));
+        if (user.DepartmentId is int did) identity.AddClaim(new Claim("departmentId", did.ToString()));
+        if (user.OrganizationId is int orgId) identity.AddClaim(new Claim("organizationId", orgId.ToString()));
+        foreach (var code in user.Permissions)
             identity.AddClaim(new Claim("permission", code));
         return principal;
     }

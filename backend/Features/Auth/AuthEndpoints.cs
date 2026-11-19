@@ -1,4 +1,5 @@
-using CorrespondenceApi.Features.Auth.Dtos;
+using CorrespondenceSystem.Contracts.Auth;
+using CorrespondenceSystem.Contracts.Auth.Dtos;
 using MediatR;
 
 namespace CorrespondenceApi.Features.Auth;

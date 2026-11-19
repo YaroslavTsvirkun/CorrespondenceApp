@@ -16,8 +16,9 @@ using CorrespondenceApi.Features.Tasks;
 using CorrespondenceApi.Features.Users;
 using CorrespondenceApi.Features.Attachments;
 using CorrespondenceApi.Infrastructure.Cors;
-using CorrespondenceApi.Infrastructure.Database;
+using CorrespondenceApi.Infrastructure.DataService;
 using CorrespondenceApi.Infrastructure.Storage;
+using CorrespondenceSystem.Contracts.Common;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -29,13 +30,10 @@ var builder = WebApplication.CreateBuilder(args);
 // .NET Aspire: телеметрія, health checks, service discovery, стійкість HTTP
 builder.AddServiceDefaults();
 
-// ---- Доступ до даних: Dapper + SQL-код (функції, процедури, тригери) у БД ----
-var dbOptions = builder.Configuration.GetSection("Database").Get<DatabaseOptions>() ?? new DatabaseOptions();
-dbOptions.ConnectionString = builder.Configuration.GetConnectionString("Default") ?? dbOptions.ConnectionString;
-builder.Services.AddSingleton(dbOptions);
-builder.Services.AddSingleton<SqlScriptDeployer>();
-builder.Services.AddScoped<Db>();
-DapperConfig.Configure();
+// ---- Доступ до даних: окремий сервіс даних (Data API) — у backend немає підключення до БД ----
+// Запити MediatR із Contracts пересилаються в dataservice (POST /rpc/{операція}).
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddDataApi(builder.Configuration);
 
 // ---- Файлове сховище вкладень: MinIO / S3 (рядок підключення "minio" — з Aspire AppHost) ----
 var storageOptions = builder.Configuration.GetSection("FileStorage").Get<FileStorageOptions>() ?? new FileStorageOptions();
@@ -44,23 +42,24 @@ builder.Services.AddSingleton(storageOptions);
 builder.Services.AddSingleton<IFileStorage, S3FileStorage>();
 builder.Services.AddHealthChecks().AddCheck<FileStorageHealthCheck>("file-storage", tags: ["ready"]);
 
+// Локальні хендлери backend (вхід, вкладення) + валідація запитів до пересилання в сервіс даних
 builder.Services.AddMediatR(cfg =>
 {
     cfg.RegisterServicesFromAssembly(typeof(Program).Assembly);
+    cfg.TypeEvaluator = t => !t.IsGenericTypeDefinition; // пересилачі Data API реєструє AddDataApi
     cfg.AddOpenBehavior(typeof(ValidationBehavior<,>));
 });
 builder.Services.AddValidatorsFromAssembly(typeof(Program).Assembly);
+builder.Services.AddValidatorsFromAssembly(typeof(DataApi).Assembly);
 
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
 // ---- Авторизація / автентифікація ----
-builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<ICurrentUser, CurrentUser>();
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
 builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
-// Динамічні права: пермішени вантажаться з БД на кожен запит
+// Динамічні права: пермішени вантажаться із сервісу даних на кожен запит
 builder.Services.AddScoped<IClaimsTransformation, PermissionClaimsTransformation>();
 builder.Services.AddAuthorization();
 
@@ -114,8 +113,5 @@ TasksEndpoints.MapTasks(app);
 DictionariesEndpoints.MapDictionaries(app);
 ReportsEndpoints.MapReports(app);
 HomeEndpoints.MapHome(app);
-
-// Розгортання SQL-коду БД; `dotnet run -- --deploy-db` — лише розгорнути БД і завершити роботу.
-if (await app.DeployDatabaseAsync(args)) return;
 
 app.Run();

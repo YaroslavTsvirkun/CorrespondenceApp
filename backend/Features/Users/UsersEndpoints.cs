@@ -1,5 +1,6 @@
-using CorrespondenceApi.Common;
-using CorrespondenceApi.Features.Users.Dtos;
+using CorrespondenceSystem.Contracts.Common;
+using CorrespondenceSystem.Contracts.Users;
+using CorrespondenceSystem.Contracts.Users.Dtos;
 using MediatR;
 
 namespace CorrespondenceApi.Features.Users;

@@ -2,4 +2,6 @@
   <Project Path="AppHost/CorrespondenceSystem.AppHost.csproj" />
   <Project Path="ServiceDefaults/CorrespondenceSystem.ServiceDefaults.csproj" />
   <Project Path="backend/CorrespondenceApi.csproj" />
+  <Project Path="contracts/CorrespondenceSystem.Contracts.csproj" />
+  <Project Path="dataservice/CorrespondenceSystem.DataService.csproj" />
 </Solution>

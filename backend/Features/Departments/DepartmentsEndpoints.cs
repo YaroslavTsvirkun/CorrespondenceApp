@@ -1,5 +1,6 @@
-using CorrespondenceApi.Common;
-using CorrespondenceApi.Features.Departments.Dtos;
+using CorrespondenceSystem.Contracts.Common;
+using CorrespondenceSystem.Contracts.Departments;
+using CorrespondenceSystem.Contracts.Departments.Dtos;
 using MediatR;
 
 namespace CorrespondenceApi.Features.Departments;
