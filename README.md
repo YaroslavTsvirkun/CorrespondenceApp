@@ -67,6 +67,30 @@ backend/Database/
 | manager | manager123 | Керівник |
 | executor | executor123 | Виконавець |
 
+## Структура бекенда (Vertical Slice)
+
+Кожна фіча — окремий каталог у `backend/Features/` з неймспейсом за назвою каталогу:
+
+```
+Features/Documents/                      namespace CorrespondenceApi.Features.Documents
+├── DocumentsEndpoints.cs                — основний файл фічі: маршрути /api/documents
+├── GetDocuments.cs                      — слайс: Query + Handler (один файл — один слайс)
+├── GetDocumentById.cs, CreateDocument.cs, UpdateDocument.cs, DeleteDocument.cs, …
+├── DocumentInputValidator.cs            — спільна валідація кількох слайсів
+└── Dtos/                                namespace CorrespondenceApi.Features.Documents.Dtos
+    ├── DocumentInput.cs                 — вхідні моделі (*Input, *Request)
+    ├── DocumentListItem.cs              — моделі відповіді (*Dto, *Item, *Row, *Option)
+    └── DocumentDetail.cs, DocumentTaskItem.cs, NextNumberResult.cs
+```
+
+Правила:
+* один публічний DTO — один файл у `Dtos/`, з конкретною назвою (`RoleDto`, `UserOptionsDto`,
+  `OverdueTaskRow`), а не загальною `Dto`;
+* слайс — статичний клас (`GetRoles`, `SaveUser`) з вкладеними `Query`/`Command`,
+  `Validator` і `Handler`;
+* проміжні рядки, потрібні лише одному запиту (напр. `RoleRow` для мапінгу Dapper), лишаються
+  `private` усередині слайсу.
+
 ## Авторизація
 
 Рольова модель із **динамічними пермішенами** (зберігаються в БД, керуються через

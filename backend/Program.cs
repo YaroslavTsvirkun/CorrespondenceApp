@@ -1,10 +1,11 @@
 using System.Text;
 using CorrespondenceApi.Common;
-using CorrespondenceApi.Features;
 using CorrespondenceApi.Features.Access;
+using CorrespondenceApi.Features.Auth;
 using CorrespondenceApi.Features.Correspondents;
 using CorrespondenceApi.Features.Departments;
 using CorrespondenceApi.Features.Dictionaries;
+using CorrespondenceApi.Features.Documents;
 using CorrespondenceApi.Features.Employees;
 using CorrespondenceApi.Features.Lookups;
 using CorrespondenceApi.Features.Organizations;
