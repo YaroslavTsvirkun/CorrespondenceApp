@@ -40,6 +40,12 @@ public class GlobalExceptionHandler(ILogger<GlobalExceptionHandler> logger) : IE
                 await ctx.Response.WriteAsJsonAsync(new { title = ue.Message, status = 401 }, ct);
                 return true;
 
+            // Клієнт розірвав з'єднання під час обробки — це не помилка сервера
+            case OperationCanceledException when ctx.RequestAborted.IsCancellationRequested:
+                logger.LogDebug("Запит {Method} {Path} скасовано клієнтом", ctx.Request.Method, ctx.Request.Path);
+                ctx.Response.StatusCode = 499; // Client Closed Request
+                return true;
+
             case DocumentConversionException ce:
                 logger.LogError(ex, "Помилка конвертації документа для перегляду");
                 ctx.Response.StatusCode = StatusCodes.Status422UnprocessableEntity;

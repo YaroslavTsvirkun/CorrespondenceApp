@@ -33,6 +33,12 @@ public class PermissionClaimsTransformation(DataApiClient dataApi, IHttpContextA
         {
             return principal; // користувача видалено або деактивовано — без пермішенів
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Клієнт розірвав з'єднання (закрив вікно, перейшов на іншу сторінку, AbortController) —
+            // відповідь уже нікому не потрібна; без пермішенів запит далі авторизацію не пройде.
+            return principal;
+        }
 
         identity.AddClaim(new Claim("perm_loaded", "1"));
         if (user.EmployeeId is int eid) identity.AddClaim(new Claim("employeeId", eid.ToString()));
