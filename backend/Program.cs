@@ -7,13 +7,17 @@ using CorrespondenceApi.Features.Departments;
 using CorrespondenceApi.Features.Dictionaries;
 using CorrespondenceApi.Features.Documents;
 using CorrespondenceApi.Features.Employees;
+using CorrespondenceApi.Features.Home;
 using CorrespondenceApi.Features.Lookups;
 using CorrespondenceApi.Features.Organizations;
 using CorrespondenceApi.Features.Reports;
 using CorrespondenceApi.Features.Settings;
 using CorrespondenceApi.Features.Tasks;
 using CorrespondenceApi.Features.Users;
+using CorrespondenceApi.Features.Attachments;
+using CorrespondenceApi.Infrastructure.Cors;
 using CorrespondenceApi.Infrastructure.Database;
+using CorrespondenceApi.Infrastructure.Storage;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -32,6 +36,13 @@ builder.Services.AddSingleton(dbOptions);
 builder.Services.AddSingleton<SqlScriptDeployer>();
 builder.Services.AddScoped<Db>();
 DapperConfig.Configure();
+
+// ---- Файлове сховище вкладень: MinIO / S3 (рядок підключення "minio" — з Aspire AppHost) ----
+var storageOptions = builder.Configuration.GetSection("FileStorage").Get<FileStorageOptions>() ?? new FileStorageOptions();
+storageOptions.ApplyConnectionString(builder.Configuration.GetConnectionString(FileStorageOptions.ConnectionStringName));
+builder.Services.AddSingleton(storageOptions);
+builder.Services.AddSingleton<IFileStorage, S3FileStorage>();
+builder.Services.AddHealthChecks().AddCheck<FileStorageHealthCheck>("file-storage", tags: ["ready"]);
 
 builder.Services.AddMediatR(cfg =>
 {
@@ -72,18 +83,15 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-const string CorsPolicy = "frontend";
-builder.Services.AddCors(o => o.AddPolicy(CorsPolicy, p => p
-    .WithOrigins("http://localhost:5180", "http://localhost:5173")
-    .AllowAnyHeader()
-    .AllowAnyMethod()));
+// ---- CORS для фронтенду (секція "Cors" в appsettings.json) ----
+builder.Services.AddFrontendCors(builder.Configuration);
 
 var app = builder.Build();
 
 app.MapDefaultEndpoints(); // /health, /alive (Aspire)
 
 app.UseExceptionHandler();
-app.UseCors(CorsPolicy);
+app.UseFrontendCors();
 app.UseAuthentication();
 app.UseAuthorization();
 
@@ -98,20 +106,16 @@ UsersEndpoints.MapUsers(app);
 SettingsEndpoints.MapSettings(app);
 LookupsEndpoints.MapLookups(app);
 DocumentsEndpoints.MapDocuments(app);
+AttachmentsEndpoints.MapAttachments(app);
 CorrespondentsEndpoints.MapCorrespondents(app);
 DepartmentsEndpoints.MapDepartments(app);
 EmployeesEndpoints.MapEmployees(app);
 TasksEndpoints.MapTasks(app);
 DictionariesEndpoints.MapDictionaries(app);
 ReportsEndpoints.MapReports(app);
+HomeEndpoints.MapHome(app);
 
-app.MapGet("/", () => Results.Redirect("/swagger")).AllowAnonymous();
-
-// Автоматичне розгортання SQL-коду з директорії Database/ (схема, функції, процедури, тригери, дані).
-// `dotnet run -- --deploy-db` — лише розгорнути БД і завершити роботу.
-var deployOnly = args.Contains("--deploy-db");
-if (dbOptions.DeployOnStartup || deployOnly)
-    await app.Services.GetRequiredService<SqlScriptDeployer>().DeployAsync();
-if (deployOnly) return;
+// Розгортання SQL-коду БД; `dotnet run -- --deploy-db` — лише розгорнути БД і завершити роботу.
+if (await app.DeployDatabaseAsync(args)) return;
 
 app.Run();

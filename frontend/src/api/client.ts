@@ -8,11 +8,40 @@ export function getToken(): string | null {
 }
 
 export async function api<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
+  const res = await send(path, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
+  });
+  return (res.status === 204 ? null : await res.json()) as T;
+}
+
+/** Завантаження файлу (multipart/form-data). Content-Type з boundary виставляє браузер. */
+export async function apiUpload<T = unknown>(path: string, form: FormData): Promise<T> {
+  const res = await send(path, { method: 'POST', body: form });
+  return (res.status === 204 ? null : await res.json()) as T;
+}
+
+/** Скачування файлу з бекенда (з JWT) і збереження через браузер. */
+export async function apiDownload(path: string, fileName: string): Promise<void> {
+  const res = await send(path);
+  const url = URL.createObjectURL(await res.blob());
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+}
+
+async function send(path: string, options: RequestInit = {}): Promise<Response> {
   const token = getToken();
   const res = await fetch(API_BASE + path, {
     ...options,
     headers: {
-      'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers ?? {}),
     },
@@ -25,7 +54,9 @@ export async function api<T = unknown>(path: string, options: RequestInit = {}):
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error((body as { title?: string }).title ?? res.statusText);
+    const { title, errors } = body as { title?: string; errors?: Record<string, string[]> };
+    const details = errors ? Object.values(errors).flat().join('; ') : '';
+    throw new Error(details || title || res.statusText);
   }
-  return (res.status === 204 ? null : await res.json()) as T;
+  return res;
 }
