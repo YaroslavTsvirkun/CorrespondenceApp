@@ -8,6 +8,7 @@ namespace CorrespondenceSystem.Contracts.Settings;
 /// <summary>Слайс: зміна патерну реєстраційного номера своєї організації.</summary>
 public static class UpdateRegistrationSetting
 {
+    [RequirePermission(Permissions.SettingsManage)]
     public record Command(RegistrationSettingInput Data) : IRequest;
 
     public class Validator : AbstractValidator<Command>

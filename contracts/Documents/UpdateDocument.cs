@@ -8,6 +8,7 @@ namespace CorrespondenceSystem.Contracts.Documents;
 /// <summary>Слайс: редагування документа (процедура dbo.usp_Document_Update).</summary>
 public static class UpdateDocument
 {
+    [RequirePermission(Permissions.DocumentsUpdate)]
     public record Command(int Id, DocumentInput Input) : IRequest;
 
     public class Validator : AbstractValidator<Command>

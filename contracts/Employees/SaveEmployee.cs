@@ -9,6 +9,7 @@ namespace CorrespondenceSystem.Contracts.Employees;
 /// <summary>Слайс: створення / оновлення працівника.</summary>
 public static class SaveEmployee
 {
+    [RequirePermission(Permissions.EmployeesManage)]
     public record Command(int? Id, EmployeeInput Data) : IRequest<int>;
 
     public class Validator : AbstractValidator<Command>

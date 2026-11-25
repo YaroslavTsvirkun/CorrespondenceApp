@@ -5,12 +5,15 @@ import {
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { api } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 
 interface RoleDto { id: number; name: string; description?: string; userCount: number; permissions: string[]; }
 interface PermDto { code: string; description?: string; category?: string; }
 
 export default function AccessPage() {
   const { message } = App.useApp();
+  // Ролі спільні для всіх організацій — змінювати їх може лише супер-адміністратор
+  const canManageRoles = useAuth().can('organizations.manage');
   const [roles, setRoles] = useState<RoleDto[]>([]);
   const [perms, setPerms] = useState<PermDto[]>([]);
   const [open, setOpen] = useState(false);
@@ -57,7 +60,7 @@ export default function AccessPage() {
     { title: 'Опис', dataIndex: 'description', render: (v) => v || '—' },
     { title: 'Прав', dataIndex: 'permissions', width: 90, align: 'center', render: (p: string[]) => <Tag color="blue">{p.length}</Tag> },
     { title: 'Користувачів', dataIndex: 'userCount', width: 130, align: 'center' },
-    {
+    ...(!canManageRoles ? [] : [{
       title: 'Дії', key: 'a', width: 110,
       render: (_, r) => (
         <Space>
@@ -67,7 +70,7 @@ export default function AccessPage() {
           </Popconfirm>
         </Space>
       ),
-    },
+    } as ColumnsType<RoleDto>[number]]),
   ];
 
   return (
@@ -76,12 +79,15 @@ export default function AccessPage() {
       <Typography.Paragraph type="secondary">
         Пермішени та їх призначення ролям зберігаються в базі даних і застосовуються
         одразу (без перевидання токена).
+        {!canManageRoles && ' Ролі спільні для всіх організацій, тож змінювати їх може лише супер-адміністратор.'}
       </Typography.Paragraph>
       <Card>
-        <div className="toolbar">
-          <span className="spacer" />
-          <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>Додати роль</Button>
-        </div>
+        {canManageRoles && (
+          <div className="toolbar">
+            <span className="spacer" />
+            <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>Додати роль</Button>
+          </div>
+        )}
         <Table rowKey="id" columns={columns} dataSource={roles} pagination={false} size="middle" />
       </Card>
 

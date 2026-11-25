@@ -7,5 +7,6 @@ namespace CorrespondenceSystem.Contracts.Users;
 /// <summary>Слайс: довідники для форми користувача (організації / ролі / працівники).</summary>
 public static class GetUserOptions
 {
+    [RequirePermission(Permissions.UsersManage)]
     public record Query : IRequest<UserOptionsDto>;
 }

@@ -33,8 +33,10 @@ builder.Services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<CurrentUser
 builder.Services.AddMediatR(cfg =>
 {
     cfg.RegisterServicesFromAssembly(typeof(Program).Assembly);
+    cfg.AddOpenBehavior(typeof(PermissionBehavior<,>)); // права — до валідації
     cfg.AddOpenBehavior(typeof(ValidationBehavior<,>));
 });
+OperationAuthorization.EnsureAllOperationsAnnotated();
 builder.Services.AddValidatorsFromAssembly(typeof(DataApi).Assembly);
 
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();

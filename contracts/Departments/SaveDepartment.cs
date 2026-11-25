@@ -9,6 +9,7 @@ namespace CorrespondenceSystem.Contracts.Departments;
 /// <summary>Слайс: створення / оновлення підрозділу.</summary>
 public static class SaveDepartment
 {
+    [RequirePermission(Permissions.DepartmentsManage)]
     public record Command(int? Id, DepartmentInput Data) : IRequest<int>;
 
     public class Validator : AbstractValidator<Command>

@@ -7,5 +7,6 @@ namespace CorrespondenceSystem.Contracts.Tasks;
 /// <summary>Слайс: доручення за документами, видимими користувачу (vw_Task + fn_VisibleDocuments).</summary>
 public static class GetTasks
 {
+    [RequirePermission]
     public record Query : IRequest<IReadOnlyList<TaskDto>>;
 }

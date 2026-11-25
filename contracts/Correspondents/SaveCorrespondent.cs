@@ -9,6 +9,7 @@ namespace CorrespondenceSystem.Contracts.Correspondents;
 /// <summary>Слайс: створення / оновлення кореспондента.</summary>
 public static class SaveCorrespondent
 {
+    [RequirePermission(Permissions.CorrespondentsManage)]
     public record Command(int? Id, CorrespondentInput Data) : IRequest<int>;
 
     public class Validator : AbstractValidator<Command>

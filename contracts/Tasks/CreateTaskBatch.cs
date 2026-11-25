@@ -11,6 +11,7 @@ namespace CorrespondenceSystem.Contracts.Tasks;
 /// </summary>
 public static class CreateTaskBatch
 {
+    [RequirePermission(Permissions.TasksAssign)]
     public record Command(TaskBatchInput Input) : IRequest<TaskBatchResult>;
 
     public class Validator : AbstractValidator<Command>

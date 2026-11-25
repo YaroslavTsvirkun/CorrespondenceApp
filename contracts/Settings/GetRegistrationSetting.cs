@@ -10,5 +10,6 @@ namespace CorrespondenceSystem.Contracts.Settings;
 /// </summary>
 public static class GetRegistrationSetting
 {
+    [RequirePermission(Permissions.SettingsManage)]
     public record Query : IRequest<RegistrationSettingDto>;
 }

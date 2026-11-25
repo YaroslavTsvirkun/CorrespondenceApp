@@ -16,6 +16,9 @@ public sealed class ReplaceAttachmentContentHandler(Db db, ICurrentUser user)
 {
     public async Task<string> Handle(ReplaceAttachmentContent.Command c, CancellationToken ct)
     {
+        // Право documents.update перевіряє PermissionBehavior; тут — видимість документа
+        // (callback редактора виконується від імені користувача, що редагував, і права на момент збереження — актуальні)
+        await AttachmentAccess.EnsureAttachmentVisibleAsync(db, user, c.Id, ct);
         var p = SqlScope.Tenant(user);
         p.Add("Id", c.Id);
         p.Add("FileName", c.FileName);

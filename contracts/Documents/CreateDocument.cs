@@ -8,6 +8,7 @@ namespace CorrespondenceSystem.Contracts.Documents;
 /// <summary>Слайс: реєстрація документа (процедура dbo.usp_Document_Create).</summary>
 public static class CreateDocument
 {
+    [RequirePermission(Permissions.DocumentsCreate)]
     public record Command(DocumentInput Input) : IRequest<int>;
 
     public class Validator : AbstractValidator<Command>

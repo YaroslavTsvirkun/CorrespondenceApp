@@ -30,9 +30,11 @@ function taskColor(name: string): string {
 export default function TasksPage() {
   const { message } = App.useApp();
   const { lookups } = useLookups();
-  const { can, canAny } = useAuth();
+  const { user, can, canAny } = useAuth();
   const canEdit = canAny(P.tasksAssign, P.tasksExecute);
   const canAssign = can(P.tasksAssign);
+  // Без tasks.assign виконавець змінює лише хід виконання власних доручень (так само перевіряє сервер)
+  const canEditTask = (t: Dto) => canAssign || (user?.employeeId != null && t.executorEmployeeId === user.employeeId);
   const today = dayjs();
 
   const [rows, setRows] = useState<Dto[]>([]);
@@ -40,6 +42,7 @@ export default function TasksPage() {
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Dto | null>(null);
+  const lockAssignment = !!editing && !canAssign;
   const [form] = Form.useForm();
 
   const load = useCallback(async () => {
@@ -96,7 +99,7 @@ export default function TasksPage() {
       title: 'Дії', key: 'a', width: 110, fixed: 'right' as const,
       render: (_: unknown, r: Dto) => (
         <Space>
-          <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} />
+          {canEditTask(r) && <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} />}
           {canAssign && (
             <Popconfirm title="Видалити доручення?" okText="Так" cancelText="Ні" onConfirm={() => remove(r.id)}>
               <Button size="small" danger icon={<DeleteOutlined />} />
@@ -125,11 +128,14 @@ export default function TasksPage() {
           <Form.Item name="documentId" label="Документ" rules={[{ required: true }]}>
             <Select showSearch optionFilterProp="label" options={docs} disabled={!!editing} />
           </Form.Item>
-          <Form.Item name="resolutionText" label="Текст резолюції" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="taskText" label="Завдання виконавцю" rules={[{ required: true }]}><Input.TextArea rows={2} /></Form.Item>
+          <Form.Item name="resolutionText" label="Текст резолюції" rules={[{ required: true }]}>
+            <Input disabled={lockAssignment} /></Form.Item>
+          <Form.Item name="taskText" label="Завдання виконавцю" rules={[{ required: true }]}>
+            <Input.TextArea rows={2} disabled={lockAssignment} /></Form.Item>
           <Space wrap>
             <Form.Item name="executorEmployeeId" label="Виконавець" rules={[{ required: true }]}>
-              <Select showSearch optionFilterProp="label" style={{ width: 260 }} options={opt(lookups.employees)} />
+              <Select showSearch optionFilterProp="label" style={{ width: 260 }} options={opt(lookups.employees)}
+                disabled={lockAssignment} />
             </Form.Item>
             <Form.Item name="statusId" label="Статус" rules={[{ required: true }]}>
               <Select style={{ width: 160 }} options={opt(lookups.taskStatuses)} />
@@ -137,7 +143,7 @@ export default function TasksPage() {
           </Space>
           <Space wrap>
             <Form.Item name="dueDate" label="Строк виконання" rules={[{ required: true }]}>
-              <DatePicker format="DD.MM.YYYY" /></Form.Item>
+              <DatePicker format="DD.MM.YYYY" disabled={lockAssignment} /></Form.Item>
             <Form.Item name="completedAt" label="Дата виконання"><DatePicker format="DD.MM.YYYY" /></Form.Item>
           </Space>
           <Form.Item name="resultText" label="Результат виконання"><Input.TextArea rows={2} /></Form.Item>

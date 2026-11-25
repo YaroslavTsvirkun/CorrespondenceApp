@@ -7,6 +7,7 @@ namespace CorrespondenceSystem.Contracts.Documents;
 /// <summary>Слайс: реєстр документів (пошук, фільтри, сортування, сторінки).</summary>
 public static class GetDocuments
 {
+    [RequirePermission(Permissions.DocumentsReadAny)]
     public class Query : IRequest<PagedResult<DocumentListItem>>
     {
         public string? Search { get; set; }

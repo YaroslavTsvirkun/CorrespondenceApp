@@ -25,6 +25,13 @@ BEGIN
         THROW 50404, @Message, 1;
     END;
 
+    -- Виконавець має належати організації документа
+    IF NOT EXISTS (SELECT 1
+                   FROM dbo.Employee e
+                   JOIN dbo.Document d ON d.Id = @DocumentId AND d.OrganizationId = e.OrganizationId
+                   WHERE e.Id = @ExecutorEmployeeId)
+        THROW 50400, N'Виконавця не знайдено в організації документа', 1;
+
     DECLARE @ResolutionId int, @TaskId int;
 
     BEGIN TRANSACTION;

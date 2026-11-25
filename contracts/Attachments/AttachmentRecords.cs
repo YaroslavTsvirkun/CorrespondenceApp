@@ -1,3 +1,4 @@
+using CorrespondenceSystem.Contracts.Common;
 using CorrespondenceSystem.Contracts.Attachments.Dtos;
 using MediatR;
 
@@ -12,12 +13,14 @@ namespace CorrespondenceSystem.Contracts.Attachments;
 /// </summary>
 public static class PrepareAttachmentUpload
 {
+    [RequirePermission(Permissions.DocumentsUpdate)]
     public record Query(int DocumentId) : IRequest<int>;
 }
 
 /// <summary>Реєстрація завантаженого у сховище файлу (dbo.usp_Attachment_Create). Повертає Id вкладення.</summary>
 public static class RegisterAttachment
 {
+    [RequirePermission(Permissions.DocumentsUpdate)]
     public record Command(
         int DocumentId, string FileName, string ContentType, long SizeBytes,
         byte[] Sha256, string StorageKey, string? Description) : IRequest<int>;
@@ -26,12 +29,14 @@ public static class RegisterAttachment
 /// <summary>Метадані файлу вкладення для завантаження (з перевіркою видимості документа).</summary>
 public static class GetAttachmentFile
 {
+    [RequirePermission(Permissions.DocumentsReadAny)]
     public record Query(int Id) : IRequest<AttachmentFileDto>;
 }
 
 /// <summary>Видалення запису вкладення (dbo.usp_Attachment_Delete). Повертає ключі об'єктів для видалення зі сховища.</summary>
 public static class DeleteAttachmentRecord
 {
+    [RequirePermission(Permissions.DocumentsUpdate)]
     public record Command(int Id) : IRequest<IReadOnlyList<string>>;
 }
 
@@ -42,6 +47,7 @@ public static class DeleteAttachmentRecord
 /// </summary>
 public static class ReplaceAttachmentContent
 {
+    [RequirePermission(Permissions.DocumentsUpdate)]
     public record Command(int Id, string FileName, string ContentType, long SizeBytes,
         byte[] Sha256, string StorageKey) : IRequest<string>;
 }
@@ -49,11 +55,13 @@ public static class ReplaceAttachmentContent
 /// <summary>Попередні версії вкладення (з перевіркою видимості документа), новіші — першими.</summary>
 public static class GetAttachmentVersions
 {
+    [RequirePermission(Permissions.DocumentsReadAny)]
     public record Query(int AttachmentId) : IRequest<IReadOnlyList<AttachmentVersionDto>>;
 }
 
 /// <summary>Метадані файлу попередньої версії вкладення (з перевіркою видимості документа).</summary>
 public static class GetAttachmentVersionFile
 {
+    [RequirePermission(Permissions.DocumentsReadAny)]
     public record Query(int AttachmentId, int VersionId) : IRequest<AttachmentFileDto>;
 }

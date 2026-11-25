@@ -12,6 +12,7 @@ namespace CorrespondenceSystem.Contracts.Users;
 /// </summary>
 public static class SaveUser
 {
+    [RequirePermission(Permissions.UsersManage)]
     public record Command(int? Id, UserInput Data) : IRequest<int>;
 
     public class Validator : AbstractValidator<Command>

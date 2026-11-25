@@ -7,5 +7,6 @@ namespace CorrespondenceSystem.Contracts.Employees;
 /// <summary>Слайс: працівники організації користувача.</summary>
 public static class GetEmployees
 {
+    [RequirePermission]
     public record Query : IRequest<IReadOnlyList<EmployeeDto>>;
 }

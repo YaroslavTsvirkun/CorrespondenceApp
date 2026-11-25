@@ -92,7 +92,11 @@ builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
 builder.Services.AddScoped<IClaimsTransformation, PermissionClaimsTransformation>();
 builder.Services.AddAuthorization();
 
-var jwtKey = builder.Configuration["Jwt:Key"]!;
+// Ключ підпису JWT: під Aspire — параметр jwt-key з AppHost, без Aspire — appsettings.Development.json.
+// Без ключа (або з коротким) сервіс не стартує: інакше токени можна було б підробити.
+var jwtKey = builder.Configuration["Jwt:Key"];
+if (string.IsNullOrWhiteSpace(jwtKey) || Encoding.UTF8.GetByteCount(jwtKey) < 32)
+    throw new InvalidOperationException("Не задано Jwt:Key (мінімум 32 байти) — ключ підпису токенів.");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {

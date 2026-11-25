@@ -7,5 +7,6 @@ namespace CorrespondenceSystem.Contracts.Users;
 /// <summary>Слайс: користувачі (vw_UserAccount) з ролями; адмін організації бачить лише своїх.</summary>
 public static class GetUsers
 {
+    [RequirePermission(Permissions.UsersManage)]
     public record Query : IRequest<IReadOnlyList<UserDto>>;
 }

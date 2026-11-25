@@ -11,6 +11,7 @@ namespace CorrespondenceSystem.DataService.Common;
 public static class SqlErrors
 {
     public const int BusinessRule = 50400;   // порушення бізнес-правила -> 400
+    public const int Forbidden = 50403;      // недостатньо прав на конкретний запис -> 403
     public const int NotFound = 50404;       // сутність не знайдено -> 404
     public const int ForeignKey = 547;       // запис використовується іншими даними
     public const int UniqueIndex = 2601;
@@ -51,9 +52,19 @@ public class GlobalExceptionHandler : IExceptionHandler
                 await ctx.Response.WriteAsJsonAsync(new { title = ue.Message, status = 401 }, ct);
                 return true;
 
+            case ForbiddenException fe:
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await ctx.Response.WriteAsJsonAsync(new { title = fe.Message, status = 403 }, ct);
+                return true;
+
             case SqlException { Number: SqlErrors.BusinessRule } se:
                 ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
                 await ctx.Response.WriteAsJsonAsync(new { title = se.Message, status = 400 }, ct);
+                return true;
+
+            case SqlException { Number: SqlErrors.Forbidden } se:
+                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await ctx.Response.WriteAsJsonAsync(new { title = se.Message, status = 403 }, ct);
                 return true;
 
             case SqlException { Number: SqlErrors.NotFound } se:

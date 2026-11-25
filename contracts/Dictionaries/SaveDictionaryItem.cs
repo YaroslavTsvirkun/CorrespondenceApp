@@ -8,6 +8,7 @@ namespace CorrespondenceSystem.Contracts.Dictionaries;
 /// <summary>Слайс: створення / оновлення запису довідника.</summary>
 public static class SaveDictionaryItem
 {
+    [RequirePermission(Permissions.DictionariesManage)]
     public record Command(string Kind, int? Id, DictionaryItemInput Data) : IRequest<int>;
 
     public class Validator : AbstractValidator<Command>

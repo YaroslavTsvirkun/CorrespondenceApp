@@ -157,17 +157,27 @@ public sealed class DocumentEditorService(
             && users.GetArrayLength() > 0 && int.TryParse(users[0].GetString(), out var lastEditor))
             userId = lastEditor;
 
-        var file = await dataApi.SendAsync(new GetAttachmentFile.Query(attachmentId), userId, ct);
-        if (DocumentKey(attachmentId, file.StorageKey) != link.Key)
-            logger.LogWarning("Вкладення #{Id} змінилося під час редагування — зберігаємо поверх (попередній вміст стане версією)", attachmentId);
+        try
+        {
+            // Права (documents.update) і видимість документа сервіс даних перевіряє на момент збереження
+            var file = await dataApi.SendAsync(new GetAttachmentFile.Query(attachmentId), userId, ct);
+            if (DocumentKey(attachmentId, file.StorageKey) != link.Key)
+                logger.LogWarning("Вкладення #{Id} змінилося під час редагування — зберігаємо поверх (попередній вміст стане версією)", attachmentId);
 
-        var fileName = string.IsNullOrEmpty(fileType)
-            ? file.FileName
-            : Path.ChangeExtension(file.FileName, "." + fileType.ToLowerInvariant());
+            var fileName = string.IsNullOrEmpty(fileType)
+                ? file.FileName
+                : Path.ChangeExtension(file.FileName, "." + fileType.ToLowerInvariant());
 
-        using var http = httpFactory.CreateClient("onlyoffice-download");
-        await using var stream = await http.GetStreamAsync(RewriteDownloadUrl(url), ct);
-        await content.ReplaceAsync(attachmentId, file.OrganizationId, fileName, stream, userId, ct);
+            using var http = httpFactory.CreateClient("onlyoffice-download");
+            await using var stream = await http.GetStreamAsync(RewriteDownloadUrl(url), ct);
+            await content.ReplaceAsync(attachmentId, file.OrganizationId, fileName, stream, userId, ct);
+        }
+        catch (DataApiException e) when ((int)e.StatusCode is >= 400 and < 500)
+        {
+            logger.LogWarning("Збереження вкладення #{Id} з редактора відхилено для користувача {User}: {Status} {Body}",
+                attachmentId, userId, (int)e.StatusCode, e.Body);
+            return 1;
+        }
 
         logger.LogInformation("Вкладення #{Id} збережено з редактора (користувач {User})", attachmentId, userId);
         return 0;

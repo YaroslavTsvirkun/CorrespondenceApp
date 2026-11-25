@@ -8,6 +8,7 @@ namespace CorrespondenceSystem.Contracts.Tasks;
 /// <summary>Слайс: редагування доручення та тексту резолюції (dbo.usp_Task_Update).</summary>
 public static class UpdateTask
 {
+    [RequirePermission(Permissions.TasksWrite)]
     public record Command(int Id, TaskInput Input) : IRequest;
 
     public class Validator : AbstractValidator<Command>

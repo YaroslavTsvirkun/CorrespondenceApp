@@ -29,6 +29,7 @@ public sealed class RegisterAttachmentHandler(Db db, ICurrentUser user)
 {
     public async Task<int> Handle(RegisterAttachment.Command c, CancellationToken ct)
     {
+        await AttachmentAccess.EnsureDocumentVisibleAsync(db, user, c.DocumentId, ct);
         var p = SqlScope.Tenant(user);
         p.Add("DocumentId", c.DocumentId);
         p.Add("FileName", c.FileName);
@@ -66,8 +67,41 @@ public sealed class DeleteAttachmentRecordHandler(Db db, ICurrentUser user)
 {
     public async Task<IReadOnlyList<string>> Handle(DeleteAttachmentRecord.Command c, CancellationToken ct)
     {
+        await AttachmentAccess.EnsureAttachmentVisibleAsync(db, user, c.Id, ct);
         var p = SqlScope.Tenant(user);
         p.Add("Id", c.Id);
         return await db.QueryProcAsync<string>("dbo.usp_Attachment_Delete", p, ct);
+    }
+}
+
+/// <summary>
+/// Зміна вкладень — лише для документів у зоні видимості користувача (тенант + dbo.fn_CanReadDocument),
+/// а не просто в межах організації: інакше право documents.update дозволяло б змінювати вкладення
+/// документів, яких користувач не бачить.
+/// </summary>
+internal static class AttachmentAccess
+{
+    public static async Task EnsureDocumentVisibleAsync(Db db, ICurrentUser user, int documentId, CancellationToken ct)
+    {
+        var p = SqlScope.Documents(user);
+        p.Add("DocumentId", documentId);
+        if (await db.QuerySingleOrDefaultAsync<bool?>(
+                $"SELECT CAST(1 AS bit) FROM dbo.Document d WHERE d.Id = @DocumentId AND {SqlScope.DocumentFilter("d")}",
+                p, ct) is null)
+            throw new NotFoundException($"Документ #{documentId} не знайдено");
+    }
+
+    public static async Task EnsureAttachmentVisibleAsync(Db db, ICurrentUser user, int attachmentId, CancellationToken ct)
+    {
+        var p = SqlScope.Documents(user);
+        p.Add("AttachmentId", attachmentId);
+        if (await db.QuerySingleOrDefaultAsync<bool?>(
+                $"""
+                SELECT CAST(1 AS bit)
+                FROM dbo.Attachment a
+                JOIN dbo.Document d ON d.Id = a.DocumentId
+                WHERE a.Id = @AttachmentId AND {SqlScope.DocumentFilter("d")}
+                """, p, ct) is null)
+            throw new NotFoundException($"Вкладення #{attachmentId} не знайдено");
     }
 }

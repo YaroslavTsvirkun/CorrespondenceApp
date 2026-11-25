@@ -8,6 +8,7 @@ namespace CorrespondenceSystem.Contracts.Tasks;
 /// <summary>Слайс: створення доручення (dbo.usp_Task_Create — резолюція + доручення в одній транзакції).</summary>
 public static class CreateTask
 {
+    [RequirePermission(Permissions.TasksAssign)]
     public record Command(TaskInput Input) : IRequest<int>;
 
     public class Validator : AbstractValidator<Command>

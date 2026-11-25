@@ -1,3 +1,4 @@
+using CorrespondenceSystem.Contracts.Common;
 using MediatR;
 
 namespace CorrespondenceSystem.Contracts.Documents;
@@ -8,5 +9,6 @@ namespace CorrespondenceSystem.Contracts.Documents;
 /// </summary>
 public static class DeleteDocumentRecord
 {
+    [RequirePermission(Permissions.DocumentsDelete)]
     public record Command(int Id) : IRequest<IReadOnlyList<string>>;
 }

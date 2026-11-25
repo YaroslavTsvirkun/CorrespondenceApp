@@ -9,5 +9,6 @@ namespace CorrespondenceSystem.Contracts.Departments;
 /// </summary>
 public static class DeleteDepartment
 {
+    [RequirePermission(Permissions.DepartmentsManage)]
     public record Command(int Id) : IRequest;
 }

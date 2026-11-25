@@ -8,16 +8,20 @@ using MediatR;
 
 namespace CorrespondenceSystem.DataService.Features.Tasks;
 
-/// <summary>Дані слайсу: редагування доручення та тексту резолюції (dbo.usp_Task_Update).</summary>
+/// <summary>
+/// Дані слайсу: редагування доручення та тексту резолюції (dbo.usp_Task_Update).
+/// Без tasks.assign (лише tasks.execute) процедура дозволяє змінити тільки хід виконання власного доручення.
+/// </summary>
 public sealed class UpdateTaskHandler(Db db, ICurrentUser user) : IRequestHandler<UpdateTask.Command>
 {
     public Task Handle(UpdateTask.Command c, CancellationToken ct)
     {
         var i = c.Input;
-        var p = SqlScope.Tenant(user);
+        var p = SqlScope.Documents(user);
         p.AddDynamicParams(new
         {
             c.Id,
+            CanAssign = user.Has(Permissions.TasksAssign),
             i.ResolutionText,
             i.ExecutorEmployeeId,
             TaskStatusId = i.StatusId,

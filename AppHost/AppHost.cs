@@ -43,6 +43,10 @@ var dataservice = builder.AddDotnetProject("dataservice", "../dataservice/Corres
     .WithEnvironment("DataApi__ApiKey", dataApiKey)
     .WithHttpHealthCheck("/health");
 
+// Ключ підпису JWT користувачів і підписаних посилань редактора (генерується й зберігається в user secrets AppHost).
+var jwtKey = builder.AddParameter("jwt-key",
+    new GenerateParameterDefault { MinLength = 64, Special = false }, secret: true, persist: true);
+
 // Бекенд (ASP.NET Core API): автентифікація (JWT), авторизація, файли вкладень у MinIO.
 // Дані читає й пише через сервіс даних (адреса — service discovery, ключ — DataApi__ApiKey).
 // Рядок підключення до MinIO приходить як ConnectionStrings__minio.
@@ -50,6 +54,7 @@ var backend = builder.AddDotnetProject("backend", "../backend/CorrespondenceApi.
     .WithReference(dataservice)
     .WaitFor(dataservice)
     .WithEnvironment("DataApi__ApiKey", dataApiKey)
+    .WithEnvironment("Jwt__Key", jwtKey)
     .WithReference(minio)
     .WaitFor(minio)
     .WithReference(gotenberg.GetEndpoint("http"))

@@ -8,6 +8,7 @@ namespace CorrespondenceSystem.Contracts.Organizations;
 /// <summary>Слайс: створення / оновлення організації.</summary>
 public static class SaveOrganization
 {
+    [RequirePermission(Permissions.OrganizationsManage)]
     public record Command(int? Id, OrganizationInput Data) : IRequest<int>;
 
     public class Validator : AbstractValidator<Command>

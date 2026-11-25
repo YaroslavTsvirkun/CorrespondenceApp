@@ -7,5 +7,6 @@ namespace CorrespondenceSystem.Contracts.Reports;
 /// <summary>Звіт: виконавська дисципліна працівників (dbo.usp_Report_ExecutorDiscipline).</summary>
 public static class ExecutorDiscipline
 {
+    [RequirePermission(Permissions.ReportsView)]
     public record Query : IRequest<IReadOnlyList<ExecutorDisciplineRow>>;
 }

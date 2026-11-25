@@ -1,3 +1,4 @@
+using CorrespondenceSystem.Contracts.Common;
 using CorrespondenceSystem.Contracts.Access.Dtos;
 using FluentValidation;
 using MediatR;
@@ -10,6 +11,7 @@ namespace CorrespondenceSystem.Contracts.Access;
 /// </summary>
 public static class SaveRole
 {
+    [RequirePermission(Permissions.OrganizationsManage)]
     public record Command(int? Id, RoleInput Data) : IRequest<int>;
 
     public class Validator : AbstractValidator<Command>

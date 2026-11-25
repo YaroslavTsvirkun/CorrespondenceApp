@@ -1,3 +1,4 @@
+using CorrespondenceSystem.Contracts.Common;
 using CorrespondenceSystem.Contracts.Auth.Dtos;
 using MediatR;
 
@@ -9,5 +10,6 @@ namespace CorrespondenceSystem.Contracts.Auth;
 /// </summary>
 public static class VerifyCredentials
 {
+    [AllowAnonymousOperation]
     public record Query(string UserName, string Password) : IRequest<UserInfo>;
 }
