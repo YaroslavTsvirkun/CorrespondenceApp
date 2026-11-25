@@ -1,4 +1,5 @@
 using CorrespondenceApi.Common;
+using CorrespondenceApi.Infrastructure.DataService;
 using CorrespondenceSystem.Contracts.Auth;
 using CorrespondenceSystem.Contracts.Auth.Dtos;
 using MediatR;
@@ -24,8 +25,24 @@ public static class AuthEndpoints
             .AllowAnonymous()
             .RequireRateLimiting(LoginRateLimitOptions.Policy);
 
-        g.MapPost("/logout", (HttpContext http) =>
+        // Вихід: токен відкликається на сервері (навіть скопійований до виходу більше не діє) і cookie видаляється
+        g.MapPost("/logout", async (ISender m, HttpContext http, ILoggerFactory loggers, CancellationToken ct) =>
             {
+                var user = http.User;
+                if (user.Identity?.IsAuthenticated == true
+                    && PermissionClaims.TokenId(user) is { } tokenId
+                    && long.TryParse(user.FindFirst("exp")?.Value, out var exp))
+                {
+                    try
+                    {
+                        await m.Send(new RevokeToken.Command(tokenId, DateTimeOffset.FromUnixTimeSeconds(exp).UtcDateTime), ct);
+                    }
+                    catch (Exception e) when (e is DataApiException or HttpRequestException)
+                    {
+                        // Cookie однаково видаляємо: браузер вийде із системи, а токен спливе сам
+                        loggers.CreateLogger("Auth").LogError(e, "Не вдалося відкликати токен під час виходу");
+                    }
+                }
                 AuthCookie.Delete(http);
                 return Results.NoContent();
             })

@@ -54,7 +54,7 @@ public class PermissionPolicyProvider(IOptions<AuthorizationOptions> options) : 
 public class TokenService(IConfiguration config)
 {
     // Токен містить лише ідентифікатор користувача; employeeId/departmentId та
-    // пермішени додаються до принципала ПЕР-ЗАПИТ із БД (PermissionClaimsTransformation),
+    // пермішени додаються до принципала ПЕР-ЗАПИТ із БД (PermissionClaims.OnTokenValidated),
     // тож зміни прав діють одразу, без перевидання токена.
     public static readonly TimeSpan Lifetime = TimeSpan.FromHours(8);
 
@@ -63,6 +63,8 @@ public class TokenService(IConfiguration config)
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, userId.ToString()),
+            // Ідентифікатор токена — щоб відкликати саме його під час виходу (dbo.RevokedToken)
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString("N")),
             new(ClaimTypes.Name, userName),
             new("fullName", fullName),
         };

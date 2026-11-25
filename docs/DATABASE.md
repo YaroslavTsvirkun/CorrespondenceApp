@@ -175,3 +175,7 @@ PBKDF2-SHA256 (`DemoSeed/002_DemoUsers.sql`, формат як у `PasswordHashe
 **Блокування.** Після `Security:Lockout:MaxFailedAttempts` (5) невдалих спроб входу поспіль
 обліковий запис блокується на `LockoutMinutes` (15) хв (`dbo.AppUser.FailedLoginCount`,
 `LockoutEndUtc`; `Schema/004_LoginLockout.sql`). Новий пароль від адміністратора знімає блокування.
+Повідомлення про блокування не показується: відповідь та сама, що й на неправильний пароль.
+
+**Вихід.** Відкликані JWT зберігаються в `dbo.RevokedToken` (`Schema/005_RevokedTokens.sql`) до моменту,
+коли токен однаково закінчився б; прострочені записи видаляються під час наступного виходу.

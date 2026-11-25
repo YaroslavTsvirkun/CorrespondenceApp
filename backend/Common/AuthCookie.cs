@@ -21,10 +21,15 @@ public static class AuthCookie
     public static void Delete(HttpContext http) =>
         http.Response.Cookies.Delete(Name, Options(http, null));
 
+    /// <summary>
+    /// Secure: поза Development — завжди (за зворотним проксі з TLS запит до backend може бути HTTP,
+    /// але браузер мусить надсилати cookie лише по HTTPS); у Development — лише для HTTPS-запитів.
+    /// </summary>
     private static CookieOptions Options(HttpContext http, DateTimeOffset? expires) => new()
     {
         HttpOnly = true,
-        Secure = http.Request.IsHttps,
+        Secure = http.Request.IsHttps
+                 || !http.RequestServices.GetRequiredService<IWebHostEnvironment>().IsDevelopment(),
         SameSite = SameSiteMode.Strict,
         Path = "/api",
         Expires = expires,

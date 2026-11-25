@@ -18,6 +18,9 @@ public class BackendFactory : WebApplicationFactory<Program>
     /// <summary>Ліміт спроб входу з однієї IP за хвилину (у тестах усі запити — з однієї адреси).</summary>
     public virtual int LoginPermitLimit => 100;
 
+    /// <summary>Токени, відкликані через заглушку сервісу даних (спільні для всіх її екземплярів у хості).</summary>
+    public System.Collections.Concurrent.ConcurrentDictionary<string, bool> RevokedTokens { get; } = new();
+
     protected virtual string Environment => "Testing";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -29,7 +32,7 @@ public class BackendFactory : WebApplicationFactory<Program>
         builder.UseSetting("RateLimiting:Login:PermitLimit", LoginPermitLimit.ToString());
         builder.UseSetting("RateLimiting:Login:WindowSeconds", "60");
         builder.ConfigureServices(services =>
-            services.AddHttpClient<DataApiClient>().ConfigurePrimaryHttpMessageHandler(() => new FakeDataApi()));
+            services.AddHttpClient<DataApiClient>().ConfigurePrimaryHttpMessageHandler(() => new FakeDataApi(RevokedTokens)));
     }
 
     /// <summary>Клієнт без автоматичної обробки cookie — заголовки Set-Cookie/Cookie видно в тестах.</summary>
@@ -52,7 +55,7 @@ public sealed class DevelopmentBackendFactory : BackendFactory
 /// Сервіс даних-заглушка: користувач «user» з паролем «good» (Id 7, право tasks.assign);
 /// решта операцій повертає порожній результат.
 /// </summary>
-internal sealed class FakeDataApi : HttpMessageHandler
+internal sealed class FakeDataApi(System.Collections.Concurrent.ConcurrentDictionary<string, bool> revoked) : HttpMessageHandler
 {
     private static readonly UserInfo User = new(7, "user", "Тестовий користувач", 1, 1, 1, "Org",
         ["Роль"], [Permissions.TasksAssign]);
@@ -68,9 +71,15 @@ internal sealed class FakeDataApi : HttpMessageHandler
                     ? Json(HttpStatusCode.OK, User)
                     : Json(HttpStatusCode.Unauthorized, new { title = "Невірний логін або пароль", status = 401 });
             case "Auth.Me.Query":
+                var me = await request.Content!.ReadFromJsonAsync<Dictionary<string, string?>>(ct);
                 return request.Headers.TryGetValues(DataApi.UserIdHeader, out var ids) && ids.Single() == "7"
+                       && !(me!.TryGetValue("tokenId", out var jti) && jti is not null && revoked.ContainsKey(jti))
                     ? Json(HttpStatusCode.OK, User)
                     : Json(HttpStatusCode.Unauthorized, new { title = "Користувача не знайдено", status = 401 });
+            case "Auth.RevokeToken.Command":
+                var revoke = await request.Content!.ReadFromJsonAsync<Dictionary<string, object>>(ct);
+                revoked[revoke!["tokenId"].ToString()!] = true;
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
             case "Tasks.CreateTask.Command":
                 return Json(HttpStatusCode.OK, 42);
             default:

@@ -17,16 +17,20 @@ public sealed class LockoutOptions
     /// <summary>Тривалість блокування, хв.</summary>
     public int LockoutMinutes { get; set; } = 15;
 }
-
 /// <summary>
 /// Дані слайсу: перевірка логіна й пароля (хеш PBKDF2 з dbo.AppUser не залишає сервіс).
 /// Після <see cref="LockoutOptions.MaxFailedAttempts"/> невдалих спроб поспіль обліковий запис
 /// блокується на <see cref="LockoutOptions.LockoutMinutes"/> хв (захист від перебору паролів;
 /// частоту запитів з однієї адреси додатково обмежує backend).
+/// Відповідь на будь-яку невдачу однакова (невідомий логін, неправильний пароль, блокування,
+/// неактивний запис), і хеш пароля обчислюється в кожному випадку — ні текст, ні час відповіді
+/// не показують, чи існує логін і чи заблоковано його.
 /// </summary>
-public sealed class VerifyCredentialsHandler(Db db, LockoutOptions lockout) : IRequestHandler<VerifyCredentials.Query, UserInfo>
+public sealed class VerifyCredentialsHandler(Db db, LockoutOptions lockout, ILogger<VerifyCredentialsHandler> logger)
+    : IRequestHandler<VerifyCredentials.Query, UserInfo>
 {
-    private const string InvalidCredentials = "Невірний логін або пароль";
+    internal const string FailedMessage =
+        "Невірний логін або пароль. Після кількох невдалих спроб вхід тимчасово блокується";
 
     // Хеш для невідомого логіна: перевірка займає стільки ж часу, скільки для справжнього користувача
     private static readonly string DummyHash = PasswordHasher.Hash(Guid.NewGuid().ToString());
@@ -39,14 +43,19 @@ public sealed class VerifyCredentialsHandler(Db db, LockoutOptions lockout) : IR
         if (access is null)
         {
             PasswordHasher.Verify(q.Password, DummyHash);
-            throw new UnauthorizedException(InvalidCredentials);
+            throw new UnauthorizedException(FailedMessage);
         }
 
         var userId = access.User.Id;
         var state = await db.QuerySingleOrDefaultAsync<LockoutState>(
             "SELECT FailedLoginCount, LockoutEndUtc FROM dbo.AppUser WHERE Id = @userId", new { userId }, ct);
         if (state?.LockoutEndUtc is { } until && until > DateTime.UtcNow)
-            throw new UnauthorizedException(LockedMessage(until));
+        {
+            // Пароль не перевіряємо (навіть правильний не приймається), але час відповіді — той самий
+            PasswordHasher.Verify(q.Password, DummyHash);
+            logger.LogWarning("Спроба входу в заблокований обліковий запис #{UserId}", userId);
+            throw new UnauthorizedException(FailedMessage);
+        }
 
         if (!PasswordHasher.Verify(q.Password, access.User.PasswordHash))
         {
@@ -61,13 +70,13 @@ public sealed class VerifyCredentialsHandler(Db db, LockoutOptions lockout) : IR
                 WHERE Id = @userId;
                 """,
                 new { userId, max = Math.Max(1, lockout.MaxFailedAttempts), minutes = lockout.LockoutMinutes }, ct);
-            throw new UnauthorizedException(lockedUntil is { } u && u > DateTime.UtcNow
-                ? LockedMessage(u)
-                : InvalidCredentials);
+            if (lockedUntil is { } u && u > DateTime.UtcNow)
+                logger.LogWarning("Обліковий запис #{UserId} заблоковано до {Until:u} після невдалих спроб входу", userId, u);
+            throw new UnauthorizedException(FailedMessage);
         }
 
         if (!access.User.IsActive)
-            throw new UnauthorizedException(InvalidCredentials);
+            throw new UnauthorizedException(FailedMessage);
 
         if (state is { FailedLoginCount: > 0 } or { LockoutEndUtc: not null })
             await db.ExecuteAsync(
@@ -75,11 +84,5 @@ public sealed class VerifyCredentialsHandler(Db db, LockoutOptions lockout) : IR
                 new { userId }, ct);
 
         return access.ToInfo();
-    }
-
-    private static string LockedMessage(DateTime untilUtc)
-    {
-        var minutes = Math.Max(1, (int)Math.Ceiling((untilUtc - DateTime.UtcNow).TotalMinutes));
-        return $"Забагато невдалих спроб входу. Обліковий запис тимчасово заблоковано — спробуйте через {minutes} хв";
     }
 }

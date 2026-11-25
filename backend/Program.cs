@@ -88,8 +88,6 @@ builder.Services.AddProblemDetails();
 builder.Services.AddScoped<TokenService>();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
 builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
-// Динамічні права: пермішени вантажаться із сервісу даних на кожен запит
-builder.Services.AddScoped<IClaimsTransformation, PermissionClaimsTransformation>();
 builder.Services.AddAuthorization();
 
 // Ключ підпису JWT: під Aspire — параметр jwt-key з AppHost, без Aspire — appsettings.Development.json.
@@ -111,11 +109,20 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             ValidateLifetime = true,
         };
         // Браузер передає JWT у HttpOnly cookie (див. AuthCookie); заголовок Authorization теж підтримується
-        options.Events = new JwtBearerEvents { OnMessageReceived = AuthCookie.ReadToken };
+        // Динамічні права: після перевірки підпису пермішени вантажаться із сервісу даних на кожен запит;
+        // деактивований користувач або відкликаний токен (вихід) -> 401 (див. PermissionClaims)
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = AuthCookie.ReadToken,
+            OnTokenValidated = PermissionClaims.OnTokenValidated,
+        };
     });
 
 // Захист від перебору паролів: ліміт спроб входу з однієї IP (+ блокування облікового запису в сервісі даних)
 LoginRateLimitOptions.AddLoginRateLimiting(builder.Services, builder.Configuration);
+
+// За зворотним проксі: IP клієнта й HTTPS — із X-Forwarded-* лише від довірених проксі (секція ForwardedHeaders)
+var behindProxy = builder.Services.AddTrustedForwardedHeaders(builder.Configuration);
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -124,6 +131,8 @@ builder.Services.AddSwaggerGen();
 builder.Services.AddFrontendCors(builder.Configuration);
 
 var app = builder.Build();
+
+if (behindProxy) app.UseForwardedHeaders(); // першим: решта middleware бачить справжні IP і схему
 
 app.MapDefaultEndpoints(); // /health, /alive (Aspire)
 

@@ -78,6 +78,54 @@ public sealed class AuthCookieTests(BackendFactory app) : IClassFixture<BackendF
         var cookie = response.Headers.GetValues("Set-Cookie").Single(c => c.StartsWith("cs_auth="));
         Assert.Contains("expires=Thu, 01 Jan 1970", cookie, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public async Task Logout_revokes_token_even_if_it_was_copied()
+    {
+        using var client = app.CreateRawClient();
+        var cookie = await LoginCookieAsync(client);
+
+        var logout = new HttpRequestMessage(HttpMethod.Post, "/api/auth/logout");
+        logout.Headers.Add("Cookie", cookie);
+        logout.Headers.Add("X-Requested-With", "fetch");
+        Assert.Equal(HttpStatusCode.NoContent, (await client.SendAsync(logout)).StatusCode);
+
+        // Той самий токен (напр. збережений до виходу) більше не автентифікує — ні з cookie, ні з Bearer
+        var viaCookie = new HttpRequestMessage(HttpMethod.Get, "/api/auth/me");
+        viaCookie.Headers.Add("Cookie", cookie);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(viaCookie)).StatusCode);
+
+        var viaBearer = new HttpRequestMessage(HttpMethod.Get, "/api/auth/me");
+        viaBearer.Headers.Authorization = new("Bearer", cookie["cs_auth=".Length..]);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await client.SendAsync(viaBearer)).StatusCode);
+
+        // Новий вхід дає новий робочий токен
+        var fresh = new HttpRequestMessage(HttpMethod.Get, "/api/auth/me");
+        fresh.Headers.Add("Cookie", await LoginCookieAsync(client));
+        Assert.Equal(HttpStatusCode.OK, (await client.SendAsync(fresh)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Cookie_is_secure_outside_development_even_over_http()
+    {
+        using var client = app.CreateRawClient();
+        var response = await client.PostAsJsonAsync("/api/auth/login", new { userName = "user", password = "good" });
+        var cookie = response.Headers.GetValues("Set-Cookie").Single(c => c.StartsWith("cs_auth="));
+        Assert.Contains("secure", cookie, StringComparison.OrdinalIgnoreCase);
+    }
+}
+
+public sealed class DevelopmentCookieTests
+{
+    [Fact]
+    public async Task Cookie_over_plain_http_in_development_is_not_secure()
+    {
+        using var app = new DevelopmentBackendFactory();
+        using var client = app.CreateRawClient();
+        var response = await client.PostAsJsonAsync("/api/auth/login", new { userName = "user", password = "good" });
+        var cookie = response.Headers.GetValues("Set-Cookie").Single(c => c.StartsWith("cs_auth="));
+        Assert.DoesNotContain("secure", cookie, StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 /// <summary>Окремий хост — власний лічильник ліміту, не залежить від інших тестів.</summary>

@@ -32,10 +32,13 @@ public sealed class LoginTests(DataServiceFactory app)
         for (var i = 0; i < MaxFailedAttempts; i++)
             Assert.Equal(HttpStatusCode.Unauthorized, (await TryLogin(userName, "wrong")).StatusCode);
 
-        // Навіть правильний пароль не приймається, поки діє блокування
+        // Навіть правильний пароль не приймається, поки діє блокування; відповідь — та сама, що й на
+        // неправильний пароль чи невідомий логін (блокування не видає, що логін існує)
         var locked = await TryLogin(userName, "Correct-Pass-1");
         Assert.Equal(HttpStatusCode.Unauthorized, locked.StatusCode);
-        Assert.Contains("заблоковано", await locked.Content.ReadAsStringAsync());
+        var unknown = await TryLogin("no-such-user", "whatever");
+        Assert.Equal((await unknown.Content.ReadFromJsonAsync<Problem>())!.Title,
+            (await locked.Content.ReadFromJsonAsync<Problem>())!.Title);
 
         // Адміністратор задає новий пароль — блокування знімається
         var admin = (await app.LoginAsync("admin", "admin123")).UserId;
@@ -67,6 +70,30 @@ public sealed class LoginTests(DataServiceFactory app)
         Assert.Equal(HttpStatusCode.Unauthorized, wrong.StatusCode);
         Assert.Equal((await unknown.Content.ReadFromJsonAsync<Problem>())!.Title,
             (await wrong.Content.ReadFromJsonAsync<Problem>())!.Title);
+    }
+
+    [Fact]
+    public async Task Revoked_token_no_longer_authenticates()
+    {
+        var user = await app.LoginAsync("manager", "manager123");
+        var tokenId = Guid.NewGuid().ToString("N");
+
+        await EnsureStatusAsync(await app.RpcAsync(new Me.Query(tokenId), user.UserId), HttpStatusCode.OK);
+
+        await EnsureStatusAsync(await app.RpcAsync(
+            new RevokeToken.Command(tokenId, DateTime.UtcNow.AddHours(1)), user.UserId), HttpStatusCode.NoContent);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, (await app.RpcAsync(new Me.Query(tokenId), user.UserId)).StatusCode);
+        // Інші сесії того самого користувача не зачеплено
+        await EnsureStatusAsync(await app.RpcAsync(new Me.Query(Guid.NewGuid().ToString("N")), user.UserId),
+            HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Anonymous_cannot_revoke_tokens()
+    {
+        var response = await app.RpcAsync(new RevokeToken.Command("x", DateTime.UtcNow.AddHours(1)), null);
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
     }
 
     private sealed record Problem(string Title);
