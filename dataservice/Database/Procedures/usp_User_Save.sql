@@ -42,7 +42,10 @@ BEGIN
             FullName       = @FullName,
             OrganizationId = @OrganizationId,
             EmployeeId     = @EmployeeId,
-            IsActive       = @IsActive
+            IsActive       = @IsActive,
+            -- Новий пароль від адміністратора знімає блокування після невдалих спроб входу
+            FailedLoginCount = IIF(@PasswordHash IS NULL, FailedLoginCount, 0),
+            LockoutEndUtc    = IIF(@PasswordHash IS NULL, LockoutEndUtc, NULL)
         WHERE Id = @Id;
 
     DELETE dbo.UserRole WHERE UserId = @Id;

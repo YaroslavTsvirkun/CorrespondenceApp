@@ -110,7 +110,12 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
             ValidateLifetime = true,
         };
+        // Браузер передає JWT у HttpOnly cookie (див. AuthCookie); заголовок Authorization теж підтримується
+        options.Events = new JwtBearerEvents { OnMessageReceived = AuthCookie.ReadToken };
     });
+
+// Захист від перебору паролів: ліміт спроб входу з однієї IP (+ блокування облікового запису в сервісі даних)
+LoginRateLimitOptions.AddLoginRateLimiting(builder.Services, builder.Configuration);
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -126,9 +131,15 @@ app.UseExceptionHandler();
 app.UseFrontendCors();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseRateLimiter();
 
-app.UseSwagger();
-app.UseSwaggerUI();
+// Swagger (опис API) — лише для розробки
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+    HomeEndpoints.MapHome(app);
+}
 
 // Vertical slices
 AuthEndpoints.MapAuth(app);
@@ -145,6 +156,8 @@ EmployeesEndpoints.MapEmployees(app);
 TasksEndpoints.MapTasks(app);
 DictionariesEndpoints.MapDictionaries(app);
 ReportsEndpoints.MapReports(app);
-HomeEndpoints.MapHome(app);
 
 app.Run();
+
+/// <summary>Точка входу доступна інтеграційним тестам (WebApplicationFactory).</summary>
+public partial class Program;

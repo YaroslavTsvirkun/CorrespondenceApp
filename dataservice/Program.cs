@@ -1,4 +1,5 @@
 using CorrespondenceSystem.Contracts.Common;
+using CorrespondenceSystem.DataService.Auth;
 using CorrespondenceSystem.DataService.Common;
 using CorrespondenceSystem.DataService.Infrastructure.Database;
 using CorrespondenceSystem.DataService.Rpc;
@@ -26,6 +27,7 @@ var apiOptions = builder.Configuration.GetSection("DataApi").Get<DataApiOptions>
 if (string.IsNullOrWhiteSpace(apiOptions.ApiKey))
     throw new InvalidOperationException("Не задано DataApi:ApiKey — спільний секрет для викликів від backend.");
 builder.Services.AddSingleton(apiOptions);
+builder.Services.AddSingleton(builder.Configuration.GetSection("Security:Lockout").Get<LockoutOptions>() ?? new LockoutOptions());
 builder.Services.AddScoped<CurrentUser>();
 builder.Services.AddScoped<ICurrentUser>(sp => sp.GetRequiredService<CurrentUser>());
 
@@ -70,3 +72,6 @@ internal sealed class DatabaseHealthCheck(DatabaseOptions options) : IHealthChec
         }
     }
 }
+
+/// <summary>Точка входу доступна інтеграційним тестам (WebApplicationFactory).</summary>
+public partial class Program;

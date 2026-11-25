@@ -112,6 +112,9 @@ public sealed class DocumentEditorService(
 
     // ---- 3. Callback збереження ----
 
+    /// <summary>Дані callback, потрібні для збереження (після перевірки підпису й ключа).</summary>
+    private sealed record SaveRequest(Uri DownloadUrl, string? FileType, int? LastEditorId);
+
     /// <summary>Обробляє callback Document Server; повертає код для відповіді { error }.</summary>
     public async Task<int> HandleCallbackAsync(int attachmentId, string? token, HttpRequest request,
         CancellationToken ct)
@@ -123,15 +126,28 @@ public sealed class DocumentEditorService(
             return 1;
         }
 
-        var body = await JsonSerializer.DeserializeAsync<JsonElement>(request.Body, cancellationToken: ct);
-        var data = await VerifiedCallbackAsync(body, request.Headers.Authorization.ToString());
-        if (data is not { } d)
+        JsonElement body;
+        try
+        {
+            body = await JsonSerializer.DeserializeAsync<JsonElement>(request.Body, cancellationToken: ct);
+        }
+        catch (JsonException)
+        {
+            logger.LogWarning("Callback редактора для вкладення #{Id}: тіло не є JSON", attachmentId);
+            return 1;
+        }
+
+        var data = body.ValueKind == JsonValueKind.Object
+            ? await VerifiedCallbackAsync(body, request.Headers.Authorization.ToString())
+            : null;
+        if (data is not { ValueKind: JsonValueKind.Object } d)
         {
             logger.LogWarning("Callback редактора для вкладення #{Id}: недійсний підпис Document Server", attachmentId);
             return 1;
         }
 
-        var status = d.TryGetProperty("status", out var s) ? s.GetInt32() : 0;
+        var status = d.TryGetProperty("status", out var s) && s.ValueKind == JsonValueKind.Number
+                     && s.TryGetInt32(out var st) ? st : 0;
         switch (status)
         {
             case 2 or 6: // документ готовий до збереження (2 — усі закрили, 6 — примусове збереження)
@@ -143,19 +159,20 @@ public sealed class DocumentEditorService(
                 return 0;
         }
 
-        if (!d.TryGetProperty("key", out var keyProp) || keyProp.GetString() != link.Key)
+        if (StringProperty(d, "key") != link.Key)
         {
             logger.LogWarning("Callback редактора для вкладення #{Id}: ключ документа не збігається", attachmentId);
             return 1;
         }
 
-        var url = d.GetProperty("url").GetString()!;
-        var fileType = d.TryGetProperty("filetype", out var ft) ? ft.GetString() : null;
+        if (ParseSaveRequest(d) is not { } save)
+        {
+            logger.LogWarning("Callback редактора для вкладення #{Id}: некоректне або недозволене посилання на файл", attachmentId);
+            return 1;
+        }
+
         // Хто зберіг: останній користувач, що змінював документ (за замовчуванням — той, хто відкрив)
-        var userId = link.UserId;
-        if (d.TryGetProperty("users", out var users) && users.ValueKind == JsonValueKind.Array
-            && users.GetArrayLength() > 0 && int.TryParse(users[0].GetString(), out var lastEditor))
-            userId = lastEditor;
+        var userId = save.LastEditorId ?? link.UserId;
 
         try
         {
@@ -164,12 +181,12 @@ public sealed class DocumentEditorService(
             if (DocumentKey(attachmentId, file.StorageKey) != link.Key)
                 logger.LogWarning("Вкладення #{Id} змінилося під час редагування — зберігаємо поверх (попередній вміст стане версією)", attachmentId);
 
-            var fileName = string.IsNullOrEmpty(fileType)
+            var fileName = string.IsNullOrEmpty(save.FileType)
                 ? file.FileName
-                : Path.ChangeExtension(file.FileName, "." + fileType.ToLowerInvariant());
+                : Path.ChangeExtension(file.FileName, "." + save.FileType.ToLowerInvariant());
 
             using var http = httpFactory.CreateClient("onlyoffice-download");
-            await using var stream = await http.GetStreamAsync(RewriteDownloadUrl(url), ct);
+            await using var stream = await http.GetStreamAsync(save.DownloadUrl, ct);
             await content.ReplaceAsync(attachmentId, file.OrganizationId, fileName, stream, userId, ct);
         }
         catch (DataApiException e) when ((int)e.StatusCode is >= 400 and < 500)
@@ -178,9 +195,60 @@ public sealed class DocumentEditorService(
                 attachmentId, userId, (int)e.StatusCode, e.Body);
             return 1;
         }
+        catch (ValidationException e)
+        {
+            logger.LogWarning("Збереження вкладення #{Id} з редактора відхилено: {Errors}", attachmentId,
+                string.Join("; ", e.Errors.Select(x => x.ErrorMessage)));
+            return 1;
+        }
+        catch (HttpRequestException e)
+        {
+            logger.LogError(e, "Не вдалося завантажити збережений файл вкладення #{Id} з Document Server", attachmentId);
+            return 1;
+        }
 
         logger.LogInformation("Вкладення #{Id} збережено з редактора (користувач {User})", attachmentId, userId);
         return 0;
+    }
+
+    private static string? StringProperty(JsonElement e, string name) =>
+        e.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+
+    /// <summary>
+    /// Посилання на збережений файл, тип файлу й останній редактор. Файл завантажується лише з Document Server:
+    /// якщо задано <see cref="DocumentEditorOptions.InternalUrl"/>, origin посилання замінюється на нього,
+    /// інакше origin має збігатися з <see cref="DocumentEditorOptions.PublicUrl"/> (захист від SSRF).
+    /// </summary>
+    private SaveRequest? ParseSaveRequest(JsonElement d)
+    {
+        if (!Uri.TryCreate(StringProperty(d, "url"), UriKind.Absolute, out var url)
+            || (url.Scheme != Uri.UriSchemeHttp && url.Scheme != Uri.UriSchemeHttps))
+            return null;
+
+        Uri downloadUrl;
+        if (!string.IsNullOrWhiteSpace(options.InternalUrl))
+        {
+            var target = new Uri(options.InternalUrl);
+            downloadUrl = new UriBuilder(url) { Scheme = target.Scheme, Host = target.Host, Port = target.Port }.Uri;
+        }
+        else if (Uri.TryCreate(options.PublicUrl, UriKind.Absolute, out var server)
+                 && Uri.Compare(url, server, UriComponents.SchemeAndServer, UriFormat.Unescaped,
+                     StringComparison.OrdinalIgnoreCase) == 0)
+            downloadUrl = url;
+        else
+            return null;
+
+        // Редактор зберігає .doc як .docx; інших типів не приймаємо
+        var fileType = StringProperty(d, "filetype");
+        if (fileType is not null && !Editable.Contains("." + fileType)) return null;
+
+        int? lastEditor = d.TryGetProperty("users", out var users) && users.ValueKind == JsonValueKind.Array
+                          && users.GetArrayLength() > 0 && users[0].ValueKind == JsonValueKind.String
+                          && int.TryParse(users[0].GetString(), out var id)
+            ? id
+            : null;
+
+        return new SaveRequest(downloadUrl, fileType, lastEditor);
     }
 
     /// <summary>
@@ -189,7 +257,7 @@ public sealed class DocumentEditorService(
     /// </summary>
     private async Task<JsonElement?> VerifiedCallbackAsync(JsonElement body, string authorization)
     {
-        if (body.TryGetProperty("token", out var bodyToken) && bodyToken.GetString() is { Length: > 0 } t)
+        if (StringProperty(body, "token") is { Length: > 0 } t)
             return await onlyOfficeJwt.ValidateAsync(t);
 
         const string bearer = "Bearer ";
@@ -198,14 +266,6 @@ public sealed class DocumentEditorService(
             return header.TryGetProperty("payload", out var p) ? p : header;
 
         return null;
-    }
-
-    private string RewriteDownloadUrl(string url)
-    {
-        if (string.IsNullOrWhiteSpace(options.InternalUrl)) return url;
-        var source = new Uri(url);
-        var target = new Uri(options.InternalUrl);
-        return new UriBuilder(source) { Scheme = target.Scheme, Host = target.Host, Port = target.Port }.Uri.ToString();
     }
 
     /// <summary>

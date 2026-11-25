@@ -22,6 +22,17 @@
     <None Update="Database\**\*.sql" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <!-- Прибираємо з вихідної директорії SQL-скрипти, яких уже немає в проєкті: інакше перейменований чи
+       перенесений скрипт (напр. демо-дані з Seed у DemoSeed) лишився б там і виконався б -->
+  <Target Name="RemoveStaleSqlScripts" AfterTargets="CopyFilesToOutputDirectory">
+    <ItemGroup>
+      <_SqlScriptOutput Include="$(OutDir)Database\**\*.sql" />
+      <_SqlScriptStale Include="@(_SqlScriptOutput)"
+                       Condition="!Exists('$(MSBuildProjectDirectory)\Database\%(RecursiveDir)%(Filename)%(Extension)')" />
+    </ItemGroup>
+    <Delete Files="@(_SqlScriptStale)" />
+  </Target>
+
   <ItemGroup>
     <ProjectReference Include="..\contracts\CorrespondenceSystem.Contracts.csproj" />
     <ProjectReference Include="..\ServiceDefaults\CorrespondenceSystem.ServiceDefaults.csproj" />

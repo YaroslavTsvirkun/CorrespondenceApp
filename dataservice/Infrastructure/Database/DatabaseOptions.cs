@@ -17,6 +17,28 @@ public sealed class DatabaseOptions
     /// <summary>Таймаут виконання одного пакета SQL-скрипта, с.</summary>
     public int CommandTimeoutSeconds { get; set; } = 120;
 
+    /// <summary>
+    /// Розгортати демо-дані (<c>Database/DemoSeed</c>): організації, документи й користувачів
+    /// з відомими паролями (admin/admin123…). Лише для розробки — у робочій БД має бути false.
+    /// </summary>
+    public bool SeedDemoData { get; set; }
+
+    /// <summary>
+    /// Перший супер-адміністратор робочої БД: створюється, якщо в БД ще немає жодного користувача.
+    /// Пароль задавайте через секрети/змінні середовища (Database__InitialAdmin__Password), не в appsettings.
+    /// </summary>
+    public InitialAdminOptions InitialAdmin { get; set; } = new();
+
     public string ResolveScriptsPath() =>
         Path.IsPathRooted(ScriptsPath) ? ScriptsPath : Path.Combine(AppContext.BaseDirectory, ScriptsPath);
+}
+
+/// <summary>Перший супер-адміністратор (секція <c>Database:InitialAdmin</c>).</summary>
+public sealed class InitialAdminOptions
+{
+    public string UserName { get; set; } = "admin";
+    public string FullName { get; set; } = "Супер-адміністратор";
+
+    /// <summary>Пароль (мінімум 12 символів). Порожній — користувач не створюється.</summary>
+    public string Password { get; set; } = "";
 }

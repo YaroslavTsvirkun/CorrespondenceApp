@@ -29,14 +29,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token) {
-      setLoading(false);
-      return;
-    }
+    // Токен — у HttpOnly cookie, скрипт його не бачить: чи є сесія, показує /api/auth/me.
+    localStorage.removeItem('token'); // токен зі старих версій, які тримали його в localStorage
     api<AuthUser>('/api/auth/me')
       .then(setUser)
-      .catch(() => localStorage.removeItem('token'))
+      .catch(() => setUser(null))
       .finally(() => setLoading(false));
   }, []);
 
@@ -47,17 +44,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (userName: string, password: string) => {
-    const res = await api<{ token: string; user: AuthUser }>('/api/auth/login', {
+    // Бекенд ставить HttpOnly cookie з JWT і повертає дані користувача
+    const me = await api<AuthUser>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ userName, password }),
     });
-    localStorage.setItem('token', res.token);
-    setUser(res.user);
+    setUser(me);
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
     setUser(null);
+    api('/api/auth/logout', { method: 'POST' }).catch(() => { /* cookie все одно сплине */ });
   };
 
   const can = (permission: string) => user?.permissions.includes(permission) ?? false;

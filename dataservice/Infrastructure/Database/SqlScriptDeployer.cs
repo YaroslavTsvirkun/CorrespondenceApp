@@ -16,13 +16,17 @@ namespace CorrespondenceSystem.DataService.Infrastructure.Database;
 ///   5. <c>Views</c>          — представлення      (CREATE OR ALTER, при кожному старті);
 ///   6. <c>Procedures</c>     — збережені процедури (CREATE OR ALTER, при кожному старті);
 ///   7. <c>Triggers</c>       — тригери            (CREATE OR ALTER, при кожному старті);
-///   8. <c>Seed</c>           — одноразові скрипти початкових даних (журналюються).
+///   8. <c>Seed</c>           — одноразові скрипти початкових даних (журналюються);
+///   9. <c>DemoSeed</c>       — одноразові демо-дані (організації, документи, користувачі з відомими паролями);
+///                             лише якщо <see cref="DatabaseOptions.SeedDemoData"/> = true.
 /// Усередині етапу скрипти виконуються в алфавітному порядку імен файлів.
 /// Скрипт ділиться на пакети за рядками <c>GO</c>; кожен скрипт виконується в окремій транзакції.
 /// </summary>
 public sealed class SqlScriptDeployer(DatabaseOptions options, ILogger<SqlScriptDeployer> logger)
 {
     private const string JournalTable = "dbo.__SchemaVersions";
+
+    private const string DemoStage = "DemoSeed";
 
     private static readonly (string Folder, bool RunOnce)[] Stages =
     [
@@ -34,6 +38,7 @@ public sealed class SqlScriptDeployer(DatabaseOptions options, ILogger<SqlScript
         ("Procedures", false),
         ("Triggers", false),
         ("Seed", true),
+        (DemoStage, true),
     ];
 
     private static readonly Regex BatchSeparator = new(
@@ -59,6 +64,8 @@ public sealed class SqlScriptDeployer(DatabaseOptions options, ILogger<SqlScript
         int executed = 0, skipped = 0;
         foreach (var (folder, runOnce) in Stages)
         {
+            if (folder == DemoStage && !options.SeedDemoData) continue;
+
             var dir = Path.Combine(root, folder);
             if (!Directory.Exists(dir)) continue;
 

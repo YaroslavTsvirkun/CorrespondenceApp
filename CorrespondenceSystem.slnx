@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/CorrespondenceApi.Tests/CorrespondenceApi.Tests.csproj" />
+    <Project Path="tests/CorrespondenceSystem.DataService.Tests/CorrespondenceSystem.DataService.Tests.csproj" />
+  </Folder>
   <Project Path="AppHost/CorrespondenceSystem.AppHost.csproj" />
   <Project Path="ServiceDefaults/CorrespondenceSystem.ServiceDefaults.csproj" />
   <Project Path="backend/CorrespondenceApi.csproj" />

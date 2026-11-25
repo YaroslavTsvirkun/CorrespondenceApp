@@ -23,7 +23,8 @@
 | 5 | `Views/` | **щоразу** — `CREATE OR ALTER` |
 | 6 | `Procedures/` | **щоразу** — `CREATE OR ALTER` |
 | 7 | `Triggers/` | **щоразу** — `CREATE OR ALTER` |
-| 8 | `Seed/` | **одноразово** (журналюється) |
+| 8 | `Seed/` | **одноразово** (журналюється): довідники, каталог пермішенів, базові ролі |
+| 9 | `DemoSeed/` | **одноразово**, лише з `Database:SeedDemoData = true`: демо-організації, документи, користувачі |
 
 Порядок відображає залежності: процедури використовують типи, скалярна
 `fn_CanReadDocument` — табличну `fn_VisibleDocuments`, представлення — скалярні функції.
@@ -155,12 +156,22 @@ Inline TVF оптимізатор вбудовує в план як підзап
 * **Новий табличний тип** — файл у `Types/` з `IF TYPE_ID(N'dbo.X') IS NULL CREATE TYPE …`.
 * **Зміна структури** — новий одноразовий скрипт `Schema/00N_Опис.sql` (ідемпотентний:
   `IF COL_LENGTH(...) IS NULL ALTER TABLE ...`). Старі одноразові скрипти не редагуйте.
-* **Нові початкові дані** — новий `Seed/00N_Опис.sql` з перевіркою `IF NOT EXISTS`.
+* **Нові початкові дані** — новий `Seed/00N_Опис.sql` з перевіркою `IF NOT EXISTS`;
+  демонстраційні — у `DemoSeed/` (у робочу БД не потрапляють).
 * Якщо функція залежить від іншої функції, назвіть файли так, щоб залежність
   виконувалась раніше за алфавітом.
 
-## Демо-облікові записи
+## Облікові записи
 
-Паролі зберігаються як PBKDF2-SHA256 (`Seed/003_RolesAndUsers.sql`, формат як у
-`PasswordHasher`): `admin/admin123`, `registrar/registrar123`, `manager/manager123`,
+**Робоча БД.** Демо-дані вимкнено (`Database:SeedDemoData = false` за замовчуванням). Якщо в БД
+немає жодного користувача, сервіс даних після розгортання створює супер-адміністратора з
+`Database:InitialAdmin` (`UserName`, за замовчуванням `admin`; `Password` — мінімум 12 символів,
+задавайте через секрети або змінну середовища `Database__InitialAdmin__Password`).
+
+**Розробка** (`appsettings.Development.json`, `SeedDemoData = true`). Паролі зберігаються як
+PBKDF2-SHA256 (`DemoSeed/002_DemoUsers.sql`, формат як у `PasswordHasher`): `admin/admin123`, `registrar/registrar123`, `manager/manager123`,
 `executor/executor123`, `orgadmin1/orgadmin123`, `orgadmin2/orgadmin123`.
+
+**Блокування.** Після `Security:Lockout:MaxFailedAttempts` (5) невдалих спроб входу поспіль
+обліковий запис блокується на `LockoutMinutes` (15) хв (`dbo.AppUser.FailedLoginCount`,
+`LockoutEndUtc`; `Schema/004_LoginLockout.sql`). Новий пароль від адміністратора знімає блокування.

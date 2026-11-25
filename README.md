@@ -46,6 +46,14 @@ frontend ──/api──▶ backend (JWT, пермішени, MinIO) ──POST
 * Ключ підпису JWT (`Jwt:Key`, мінімум 32 байти) у репозиторії не зберігається: під Aspire це
   згенерований параметр `jwt-key` у user secrets AppHost, для окремого запуску — `appsettings.Development.json`.
   Без ключа backend не стартує.
+* Браузер отримує JWT у cookie `cs_auth` (HttpOnly, SameSite=Strict, Path=/api) — скриптам сторінки токен
+  недоступний, у тіло відповіді на вхід він не потрапляє. Змінюючі запити (POST/PUT/DELETE) з cookie
+  backend приймає лише із заголовком `X-Requested-With` (його ставить фронтенд) — захист від CSRF.
+  Заголовок `Authorization: Bearer …` теж підтримується (Swagger, інструменти). Вихід — `POST /api/auth/logout`.
+* Перебір паролів: `/api/auth/login` обмежено за IP (`RateLimiting:Login`, за замовчуванням 10 спроб
+  на хвилину, далі 429), а сервіс даних блокує обліковий запис після серії невдалих спроб
+  (`Security:Lockout`). За зворотним проксі налаштуйте ForwardedHeaders, інакше ліміт буде спільним.
+* Swagger UI і перенаправлення `/` → `/swagger` доступні лише в середовищі Development.
 * Помилки сервісу даних (400 — валідація/бізнес-правила, 401, 403, 404) backend повертає клієнту без змін;
   недоступність сервісу — 503, внутрішня помилка — 502. POST-виклики не повторюються автоматично.
 
@@ -84,16 +92,18 @@ dataservice/Database/
 ├── Views/          vw_*.sql                — представлення (щоразу, CREATE OR ALTER)
 ├── Procedures/     usp_*.sql               — збережені процедури (щоразу, CREATE OR ALTER)
 ├── Triggers/       trg_*.sql               — тригери (щоразу, CREATE OR ALTER)
-└── Seed/           001..003_*.sql          — довідники, демо-дані, ролі й користувачі (одноразово)
+├── Seed/           001..004_*.sql          — довідники, пермішени, базові ролі (одноразово)
+└── DemoSeed/       001..002_*.sql          — демо-дані й демо-користувачі (одноразово, лише з SeedDemoData)
 ```
 
 Деплоєр (`Infrastructure/Database/SqlScriptDeployer.cs`) створює БД, якщо її немає,
 веде журнал одноразових скриптів у `dbo.__SchemaVersions` і ділить скрипти на пакети за `GO`.
 Налаштування — секція `Database` в `appsettings.json` (`DeployOnStartup`, `ScriptsPath`,
-`CommandTimeoutSeconds`). Повний опис об'єктів БД і правила додавання нового SQL-коду —
+`CommandTimeoutSeconds`, `SeedDemoData`, `InitialAdmin`). Демо-дані розгортаються лише в Development;
+у робочій БД першого супер-адміністратора створює `Database:InitialAdmin`. Повний опис об'єктів БД і правила додавання нового SQL-коду —
 у [docs/DATABASE.md](docs/DATABASE.md).
 
-## Демо-облікові записи
+## Демо-облікові записи (лише Development)
 
 | Логін | Пароль | Роль |
 |---|---|---|
@@ -101,6 +111,20 @@ dataservice/Database/
 | registrar | registrar123 | Реєстратор |
 | manager | manager123 | Керівник |
 | executor | executor123 | Виконавець |
+
+## Тести
+
+```powershell
+dotnet test CorrespondenceSystem.slnx
+```
+
+* `tests/CorrespondenceSystem.DataService.Tests` — інтеграційні тести сервісу даних на справжній БД:
+  кожен прогін створює тимчасову базу в SQL Server LocalDB (потрібен `(localdb)\MSSQLLocalDB`),
+  розгортає весь SQL-код і демо-дані, а після тестів видаляє базу. Перевіряють права операцій,
+  ізоляцію організацій, зону видимості документів, правила доручень і вкладень, блокування входу,
+  розгортання робочої БД без демо-даних.
+* `tests/CorrespondenceApi.Tests` — backend із заглушкою сервісу даних: cookie з JWT, захист від CSRF,
+  ліміт спроб входу, Swagger лише в Development.
 
 ## Структура (Vertical Slice у трьох проєктах)
 

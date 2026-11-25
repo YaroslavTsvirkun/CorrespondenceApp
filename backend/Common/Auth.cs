@@ -56,6 +56,8 @@ public class TokenService(IConfiguration config)
     // Токен містить лише ідентифікатор користувача; employeeId/departmentId та
     // пермішени додаються до принципала ПЕР-ЗАПИТ із БД (PermissionClaimsTransformation),
     // тож зміни прав діють одразу, без перевидання токена.
+    public static readonly TimeSpan Lifetime = TimeSpan.FromHours(8);
+
     public string Create(int userId, string userName, string fullName)
     {
         var claims = new List<Claim>
@@ -70,7 +72,7 @@ public class TokenService(IConfiguration config)
             issuer: config["Jwt:Issuer"],
             audience: config["Jwt:Audience"],
             claims: claims,
-            expires: DateTime.UtcNow.AddHours(8),
+            expires: DateTime.UtcNow.Add(Lifetime),
             signingCredentials: new SigningCredentials(key, SecurityAlgorithms.HmacSha256));
         return new JwtSecurityTokenHandler().WriteToken(token);
     }
