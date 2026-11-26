@@ -30,7 +30,7 @@ public static class AuthEndpoints
             {
                 var user = http.User;
                 if (user.Identity?.IsAuthenticated == true
-                    && PermissionClaims.TokenId(user) is { } tokenId
+                    && user.FindTokenId() is { } tokenId
                     && long.TryParse(user.FindFirst("exp")?.Value, out var exp))
                 {
                     try

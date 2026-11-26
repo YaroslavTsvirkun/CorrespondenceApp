@@ -11,11 +11,12 @@ namespace CorrespondenceSystem.DataService.Features.Settings;
 /// Дані слайсу: патерн номера організації з попереднім переглядом
 /// (формує скалярна функція БД dbo.fn_FormatRegistrationNumber).
 /// </summary>
-public sealed class GetRegistrationSettingHandler(Db db, ICurrentUser user) : IRequestHandler<GetRegistrationSetting.Query, RegistrationSettingDto>
+public sealed class GetRegistrationSettingHandler(Db db, ICurrentUser user) : IRequestHandler<GetRegistrationSetting.Query, RegistrationSettingDto?>
 {
-    public async Task<RegistrationSettingDto> Handle(GetRegistrationSetting.Query q, CancellationToken ct)
+    public async Task<RegistrationSettingDto?> Handle(GetRegistrationSetting.Query q, CancellationToken ct)
     {
-        var orgId = OrganizationScope.RequireOrg(user);
+        // Супер-адмін без організації: налаштування немає (патерн задається в картці організації)
+        if (user.OrganizationId is not int orgId) return null;
         return await db.QuerySingleOrDefaultAsync<RegistrationSettingDto>("""
             SELECT o.Id AS OrganizationId, o.Name AS OrganizationName,
                    o.RegistrationNumberPattern AS Pattern,

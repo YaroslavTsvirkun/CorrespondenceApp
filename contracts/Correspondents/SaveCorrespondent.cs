@@ -1,7 +1,6 @@
 using CorrespondenceSystem.Contracts.Common;
 using CorrespondenceSystem.Contracts.Correspondents.Dtos;
 using FluentValidation;
-using FluentValidation.Results;
 using MediatR;
 
 namespace CorrespondenceSystem.Contracts.Correspondents;

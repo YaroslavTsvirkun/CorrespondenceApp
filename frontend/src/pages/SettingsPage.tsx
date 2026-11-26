@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { App, Button, Card, Form, Input, Space, Tag, Typography } from 'antd';
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Alert, App, Button, Card, Form, Input, Space, Tag, Typography } from 'antd';
 import { SaveOutlined } from '@ant-design/icons';
 import { api } from '../api/client';
+import { useApiAction, useApiData } from '../hooks/useApi';
 
 interface RegSetting { organizationId: number; organizationName: string; pattern: string; preview: string; }
 
@@ -26,31 +28,41 @@ function previewOf(pattern: string): string {
     .replace(/\{dir\}/gi, 'IN');
 }
 
+const loadSetting = () => api<RegSetting | null>('/api/settings/registration');
+
 export default function SettingsPage() {
   const { message } = App.useApp();
-  const [data, setData] = useState<RegSetting | null>(null);
-  const [pattern, setPattern] = useState('');
+  const run = useApiAction();
+  const { data, loading, reload } = useApiData(loadSetting, null);
+  // Патерн у полі: чернетка користувача або поточний із сервера
+  const [draft, setDraft] = useState<string | null>(null);
+  const pattern = draft ?? data?.pattern ?? '';
   const [saving, setSaving] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      const s = await api<RegSetting>('/api/settings/registration');
-      setData(s); setPattern(s.pattern);
-    } catch (e) { message.error((e as Error).message); }
-  }, [message]);
-  useEffect(() => { load(); }, [load]);
 
   const livePreview = useMemo(() => previewOf(pattern || ''), [pattern]);
 
   const save = async () => {
     if (!pattern.trim()) { message.warning('Вкажіть патерн'); return; }
     setSaving(true);
-    try {
-      await api('/api/settings/registration', { method: 'PUT', body: JSON.stringify({ pattern: pattern.trim() }) });
-      message.success('Налаштування збережено'); await load();
-    } catch (e) { message.error((e as Error).message); }
-    finally { setSaving(false); }
+    const saved = await run(
+      () => api('/api/settings/registration', { method: 'PUT', body: JSON.stringify({ pattern: pattern.trim() }) }),
+      'Налаштування збережено');
+    setSaving(false);
+    if (saved) { setDraft(null); reload(); }
   };
+
+  // Супер-адмін не прив'язаний до організації — патерн задається в картці кожної організації
+  if (!loading && !data) {
+    return (
+      <>
+        <Typography.Title level={3}>Налаштування</Typography.Title>
+        <Alert type="info" showIcon style={{ maxWidth: 720 }}
+          message="Ваш обліковий запис не прив'язаний до організації"
+          description={<>Патерн реєстраційного номера задається окремо для кожної організації —
+            у її картці в розділі <Link to="/organizations">«Організації»</Link>.</>} />
+      </>
+    );
+  }
 
   return (
     <>
@@ -64,7 +76,7 @@ export default function SettingsPage() {
         <Form layout="vertical">
           <Form.Item label="Патерн"
             help="Лічильник зростає окремо для кожного типу документа в межах року.">
-            <Input value={pattern} onChange={(e) => setPattern(e.target.value)}
+            <Input value={pattern} onChange={(e) => setDraft(e.target.value)}
               placeholder="{type}-{seq:000}/{year}" style={{ fontFamily: 'monospace' }} />
           </Form.Item>
           <Form.Item label="Приклад">

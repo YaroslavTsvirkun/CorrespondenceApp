@@ -1,9 +1,4 @@
-using System.Security.Cryptography;
-using CorrespondenceSystem.Contracts.Common;
 using CorrespondenceSystem.DataService.Auth;
-using FluentValidation;
-using FluentValidation.Results;
-
 namespace CorrespondenceSystem.DataService.Common;
 
 /// <summary>Користувач, від імені якого backend викликає операцію Data API.</summary>
@@ -39,50 +34,5 @@ public sealed class CurrentUser : ICurrentUser
     {
         Access = access;
         _permissions = new HashSet<string>(access.Permissions, StringComparer.Ordinal);
-    }
-}
-
-// ---- Зона видимості документів (за пермішенами поточного користувача) ----
-// Рівень передається у скалярну функцію БД dbo.fn_CanReadDocument:
-//   3 — уся кореспонденція, 2 — свого підрозділу, 1 — лише задіяні документи, 0 — немає доступу.
-public static class DocumentScope
-{
-    public static byte Level(ICurrentUser u)
-    {
-        if (u.Has(Permissions.DocumentsReadAll)) return 3;
-        if (u.Has(Permissions.DocumentsReadDepartment) && u.DepartmentId is not null) return 2;
-        if (u.Has(Permissions.DocumentsReadInvolved) && u.EmployeeId is not null) return 1;
-        return 0;
-    }
-}
-
-/// <summary>Організація поточного користувача для налаштувань рівня організації.</summary>
-public static class OrganizationScope
-{
-    public static int RequireOrg(ICurrentUser user) =>
-        user.OrganizationId ?? throw new ValidationException([new ValidationFailure("organization",
-            "Супер-адміністратор не прив'язаний до організації — задайте патерн у картці організації")]);
-}
-
-// ---- Хешування паролів (PBKDF2, без зовнішніх пакетів) ----
-public static class PasswordHasher
-{
-    private const int Iterations = 100_000;
-
-    public static string Hash(string password)
-    {
-        var salt = RandomNumberGenerator.GetBytes(16);
-        var hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, Iterations, HashAlgorithmName.SHA256, 32);
-        return $"{Convert.ToBase64String(salt)}.{Convert.ToBase64String(hash)}";
-    }
-
-    public static bool Verify(string password, string stored)
-    {
-        var parts = stored.Split('.');
-        if (parts.Length != 2) return false;
-        var salt = Convert.FromBase64String(parts[0]);
-        var expected = Convert.FromBase64String(parts[1]);
-        var actual = Rfc2898DeriveBytes.Pbkdf2(password, salt, Iterations, HashAlgorithmName.SHA256, 32);
-        return CryptographicOperations.FixedTimeEquals(expected, actual);
     }
 }

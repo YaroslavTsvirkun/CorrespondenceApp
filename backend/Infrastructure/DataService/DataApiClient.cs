@@ -1,6 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
-using System.Security.Claims;
+using CorrespondenceApi.Common;
 using CorrespondenceSystem.Contracts.Common;
 using MediatR;
 
@@ -45,6 +45,7 @@ public sealed class DataApiClient(HttpClient http, DataApiOptions options, IHttp
     public async Task<TResponse> SendAsync<TResponse>(IRequest<TResponse> request, int? userId, CancellationToken ct)
     {
         using var response = await PostAsync(request, userId, ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NoContent) return default!;
         return (await response.Content.ReadFromJsonAsync<TResponse>(ct))!;
     }
 
@@ -72,6 +73,5 @@ public sealed class DataApiClient(HttpClient http, DataApiOptions options, IHttp
         throw new DataApiException(response.StatusCode, body);
     }
 
-    private int? CurrentUserId() =>
-        int.TryParse(accessor.HttpContext?.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+    private int? CurrentUserId() => accessor.HttpContext?.User.FindUserId();
 }

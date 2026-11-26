@@ -1,5 +1,4 @@
 using CorrespondenceSystem.Contracts.Common;
-using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.Data.SqlClient;
 
@@ -21,73 +20,31 @@ public static class SqlErrors
 }
 
 /// <summary>
-/// Глобальна обробка винятків -> коректні HTTP-коди (400 / 401 / 404).
+/// Глобальна обробка винятків -> HTTP-коди. Спільні винятки (валідація, 401, 403, 404) — через
+/// <see cref="Errors.ToProblem"/>, як і в backend; коди помилок SQL (THROW у процедурах, обмеження БД) — тут.
 /// Формат тіла ({ title, status, errors? }) backend передає клієнту без змін.
 /// </summary>
 public class GlobalExceptionHandler : IExceptionHandler
 {
     public async ValueTask<bool> TryHandleAsync(HttpContext ctx, Exception ex, CancellationToken ct)
     {
-        switch (ex)
-        {
-            case ValidationException ve:
-                ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
-                await ctx.Response.WriteAsJsonAsync(new
-                {
-                    title = "Помилка валідації",
-                    status = 400,
-                    errors = ve.Errors
-                        .GroupBy(e => e.PropertyName)
-                        .ToDictionary(g => g.Key, g => g.Select(e => e.ErrorMessage).ToArray()),
-                }, ct);
-                return true;
+        if ((Errors.ToProblem(ex) ?? FromSql(ex)) is not { } problem)
+            return false;
 
-            case NotFoundException nf:
-                ctx.Response.StatusCode = StatusCodes.Status404NotFound;
-                await ctx.Response.WriteAsJsonAsync(new { title = nf.Message, status = 404 }, ct);
-                return true;
-
-            case UnauthorizedException ue:
-                ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                await ctx.Response.WriteAsJsonAsync(new { title = ue.Message, status = 401 }, ct);
-                return true;
-
-            case ForbiddenException fe:
-                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
-                await ctx.Response.WriteAsJsonAsync(new { title = fe.Message, status = 403 }, ct);
-                return true;
-
-            case SqlException { Number: SqlErrors.BusinessRule } se:
-                ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
-                await ctx.Response.WriteAsJsonAsync(new { title = se.Message, status = 400 }, ct);
-                return true;
-
-            case SqlException { Number: SqlErrors.Forbidden } se:
-                ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
-                await ctx.Response.WriteAsJsonAsync(new { title = se.Message, status = 403 }, ct);
-                return true;
-
-            case SqlException { Number: SqlErrors.NotFound } se:
-                ctx.Response.StatusCode = StatusCodes.Status404NotFound;
-                await ctx.Response.WriteAsJsonAsync(new { title = se.Message, status = 404 }, ct);
-                return true;
-
-            case SqlException { Number: SqlErrors.ForeignKey }:
-                ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
-                await ctx.Response.WriteAsJsonAsync(new
-                {
-                    title = "Запис пов'язаний з іншими даними — операцію заборонено",
-                    status = 400,
-                }, ct);
-                return true;
-
-            case SqlException { Number: SqlErrors.UniqueIndex or SqlErrors.UniqueConstraint }:
-                ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
-                await ctx.Response.WriteAsJsonAsync(new { title = "Запис із такими даними вже існує", status = 400 }, ct);
-                return true;
-
-            default:
-                return false;
-        }
+        ctx.Response.StatusCode = problem.Status;
+        await ctx.Response.WriteAsJsonAsync(problem.Body, ct);
+        return true;
     }
+
+    private static Errors.Problem? FromSql(Exception ex) => ex switch
+    {
+        SqlException { Number: SqlErrors.BusinessRule } se => Errors.Simple(400, se.Message),
+        SqlException { Number: SqlErrors.Forbidden } se => Errors.Simple(403, se.Message),
+        SqlException { Number: SqlErrors.NotFound } se => Errors.Simple(404, se.Message),
+        SqlException { Number: SqlErrors.ForeignKey } =>
+            Errors.Simple(400, "Запис пов'язаний з іншими даними — операцію заборонено"),
+        SqlException { Number: SqlErrors.UniqueIndex or SqlErrors.UniqueConstraint } =>
+            Errors.Simple(400, "Запис із такими даними вже існує"),
+        _ => null,
+    };
 }

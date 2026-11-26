@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
-  App, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
+  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { api } from '../api/client';
-import { useLookups, opt } from '../data/lookups';
-import { useAuth, P } from '../auth/AuthContext';
+import { useLookups } from '../data/lookups';
+import { opt } from '../data/options';
+import { useAuth } from '../auth/AuthContext';
+import { P } from '../auth/permissions';
+import { useCrud } from '../hooks/useCrud';
 
 interface Dto {
   id: number; fullName: string; positionName: string; departmentId: number;
@@ -14,38 +16,20 @@ interface Dto {
 }
 
 export default function EmployeesPage() {
-  const { message } = App.useApp();
   const { lookups } = useLookups();
   const { can } = useAuth();
   const editable = can(P.employees);
-  const [rows, setRows] = useState<Dto[]>([]);
-  const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Dto | null>(null);
   const [form] = Form.useForm();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try { setRows(await api<Dto[]>('/api/employees')); }
-    catch (e) { message.error((e as Error).message); }
-    finally { setLoading(false); }
-  }, [message]);
-  useEffect(() => { load(); }, [load]);
+  const { rows, loading, save, remove } = useCrud<Dto>('/api/employees');
 
   const openAdd = () => { setEditing(null); form.resetFields(); form.setFieldsValue({ isActive: true }); setOpen(true); };
   const openEdit = (e: Dto) => { setEditing(e); form.setFieldsValue(e); setOpen(true); };
   const submit = async () => {
     const v = await form.validateFields();
-    try {
-      const body = JSON.stringify(v);
-      if (editing) await api(`/api/employees/${editing.id}`, { method: 'PUT', body });
-      else await api('/api/employees', { method: 'POST', body });
-      setOpen(false); message.success('Збережено'); load();
-    } catch (e) { message.error((e as Error).message); }
-  };
-  const remove = async (id: number) => {
-    try { await api(`/api/employees/${id}`, { method: 'DELETE' }); message.success('Видалено'); load(); }
-    catch (e) { message.error((e as Error).message); }
+    if (await save(editing?.id, v)) setOpen(false);
   };
 
   const columns: ColumnsType<Dto> = [

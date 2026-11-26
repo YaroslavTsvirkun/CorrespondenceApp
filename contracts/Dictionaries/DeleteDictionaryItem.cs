@@ -1,6 +1,4 @@
 using CorrespondenceSystem.Contracts.Common;
-using FluentValidation;
-using FluentValidation.Results;
 using MediatR;
 
 namespace CorrespondenceSystem.Contracts.Dictionaries;

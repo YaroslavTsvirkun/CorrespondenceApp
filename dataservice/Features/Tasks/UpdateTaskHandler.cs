@@ -3,7 +3,6 @@ using CorrespondenceSystem.Contracts.Tasks;
 using CorrespondenceSystem.Contracts.Tasks.Dtos;
 using CorrespondenceSystem.DataService.Common;
 using CorrespondenceSystem.DataService.Infrastructure.Database;
-using FluentValidation;
 using MediatR;
 
 namespace CorrespondenceSystem.DataService.Features.Tasks;

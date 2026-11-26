@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
 
@@ -23,26 +23,36 @@ const EMPTY: Lookups = {
   correspondentTypes: [], taskStatuses: [], departments: [], employees: [], correspondents: [],
 };
 
-const Ctx = createContext<{ lookups: Lookups; reload: () => Promise<void> }>({
-  lookups: EMPTY, reload: async () => {},
+/** ready — довідники поточного користувача отримано (або спроба завершилась помилкою). */
+const Ctx = createContext<{ lookups: Lookups; ready: boolean; reload: () => void }>({
+  lookups: EMPTY, ready: false, reload: () => {},
 });
 
 export function LookupsProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [lookups, setLookups] = useState<Lookups>(EMPTY);
+  // Довідники належать конкретному користувачу (організація, права): після виходу чи зміни
+  // користувача попередні не показуються
+  const [loaded, setLoaded] = useState<{ userId: number; lookups: Lookups } | null>(null);
+  const [version, setVersion] = useState(0);
+  const userId = user?.userId;
 
-  const reload = async () => {
-    try { setLookups(await api<Lookups>('/api/lookups')); } catch { /* ignore */ }
-  };
+  useEffect(() => {
+    if (userId == null) return;
+    let active = true;
+    api<Lookups>('/api/lookups')
+      .then((lookups) => { if (active) setLoaded({ userId, lookups }); })
+      // Без довідників форми лишаються порожніми, але сторінки не чекають їх вічно
+      .catch(() => { if (active) setLoaded({ userId, lookups: EMPTY }); });
+    return () => { active = false; };
+  }, [userId, version]);
 
-  useEffect(() => { if (user) reload(); else setLookups(EMPTY); }, [user]); // eslint-disable-line
+  const reload = useCallback(() => setVersion((v) => v + 1), []);
+  const ready = userId != null && loaded?.userId === userId;
+  const lookups = ready ? loaded.lookups : EMPTY;
 
-  return <Ctx.Provider value={{ lookups, reload }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ lookups, ready, reload }}>{children}</Ctx.Provider>;
 }
 
+// Хук поруч із провайдером — звичний шаблон контексту
 // eslint-disable-next-line react-refresh/only-export-components
 export function useLookups() { return useContext(Ctx); }
-
-// eslint-disable-next-line react-refresh/only-export-components
-export const opt = (arr: { id: number; name: string }[]) =>
-  arr.map((x) => ({ value: x.id, label: x.name }));

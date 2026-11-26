@@ -1,33 +1,28 @@
-import { useEffect, useState } from 'react';
-import { App, Card, Col, Progress, Row, Table, Tag, Typography } from 'antd';
+import { Card, Col, Progress, Row, Table, Tag, Typography } from 'antd';
 import dayjs from 'dayjs';
 import { api } from '../api/client';
+import { useApiData } from '../hooks/useApi';
 
 interface ByType { type: string; count: number; }
 interface ByDir { direction: string; count: number; percent: number; }
 interface Disc { executor: string; total: number; done: number; percent: number; }
 interface Overdue { taskId: number; document: string; executor: string; dueDate: string; daysOverdue: number; }
 
-export default function ReportsPage() {
-  const { message } = App.useApp();
-  const [byType, setByType] = useState<ByType[]>([]);
-  const [byDir, setByDir] = useState<ByDir[]>([]);
-  const [disc, setDisc] = useState<Disc[]>([]);
-  const [overdue, setOverdue] = useState<Overdue[]>([]);
+interface Reports { byType: ByType[]; byDir: ByDir[]; disc: Disc[]; overdue: Overdue[]; }
+const EMPTY: Reports = { byType: [], byDir: [], disc: [], overdue: [] };
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [a, b, c, d] = await Promise.all([
-          api<ByType[]>('/api/reports/by-type'),
-          api<ByDir[]>('/api/reports/by-direction'),
-          api<Disc[]>('/api/reports/executor-discipline'),
-          api<Overdue[]>('/api/reports/overdue-tasks'),
-        ]);
-        setByType(a); setByDir(b); setDisc(c); setOverdue(d);
-      } catch (e) { message.error((e as Error).message); }
-    })();
-  }, [message]);
+const loadReports = async (): Promise<Reports> => {
+  const [byType, byDir, disc, overdue] = await Promise.all([
+    api<ByType[]>('/api/reports/by-type'),
+    api<ByDir[]>('/api/reports/by-direction'),
+    api<Disc[]>('/api/reports/executor-discipline'),
+    api<Overdue[]>('/api/reports/overdue-tasks'),
+  ]);
+  return { byType, byDir, disc, overdue };
+};
+
+export default function ReportsPage() {
+  const { data: { byType, byDir, disc, overdue } } = useApiData(loadReports, EMPTY);
 
   return (
     <>

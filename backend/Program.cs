@@ -1,4 +1,3 @@
-using System.Text;
 using CorrespondenceApi.Common;
 using CorrespondenceApi.Features.Access;
 using CorrespondenceApi.Features.Auth;
@@ -22,7 +21,6 @@ using CorrespondenceApi.Infrastructure.DataService;
 using CorrespondenceApi.Infrastructure.Storage;
 using CorrespondenceSystem.Contracts.Common;
 using FluentValidation;
-using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.IdentityModel.Tokens;
@@ -67,6 +65,7 @@ var editorOptions = builder.Configuration.GetSection("DocumentEditor").Get<Docum
                     ?? new DocumentEditorOptions();
 builder.Services.AddSingleton(editorOptions);
 builder.Services.AddSingleton<OnlyOfficeJwt>();
+builder.Services.AddSingleton<EditorLinkTokens>();
 builder.Services.AddScoped<DocumentEditorService>();
 builder.Services.AddScoped<AttachmentContentService>();
 builder.Services.AddHttpClient("onlyoffice-download"); // збережений файл з Document Server
@@ -85,41 +84,40 @@ builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 builder.Services.AddProblemDetails();
 
 // ---- Авторизація / автентифікація ----
-builder.Services.AddScoped<TokenService>();
+// Ключ підпису JWT: під Aspire — параметр jwt-key з AppHost, без Aspire — appsettings.Development.json.
+// Без ключа (або з коротким) сервіс не стартує: інакше токени можна було б підробити.
+var jwt = JwtOptions.Load(builder.Configuration);
+builder.Services.AddSingleton(jwt);
+builder.Services.AddSingleton<TokenService>();
 builder.Services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
 builder.Services.AddScoped<IAuthorizationHandler, PermissionHandler>();
 builder.Services.AddAuthorization();
 
-// Ключ підпису JWT: під Aspire — параметр jwt-key з AppHost, без Aspire — appsettings.Development.json.
-// Без ключа (або з коротким) сервіс не стартує: інакше токени можна було б підробити.
-var jwtKey = builder.Configuration["Jwt:Key"];
-if (string.IsNullOrWhiteSpace(jwtKey) || Encoding.UTF8.GetByteCount(jwtKey) < 32)
-    throw new InvalidOperationException("Не задано Jwt:Key (мінімум 32 байти) — ключ підпису токенів.");
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-            ValidIssuer = builder.Configuration["Jwt:Issuer"],
+            ValidIssuer = jwt.Issuer,
             ValidateAudience = true,
-            ValidAudience = builder.Configuration["Jwt:Audience"],
+            ValidAudience = jwt.Audience,
             ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            IssuerSigningKey = jwt.SigningKey,
             ValidateLifetime = true,
         };
-        // Браузер передає JWT у HttpOnly cookie (див. AuthCookie); заголовок Authorization теж підтримується
-        // Динамічні права: після перевірки підпису пермішени вантажаться із сервісу даних на кожен запит;
-        // деактивований користувач або відкликаний токен (вихід) -> 401 (див. PermissionClaims)
         options.Events = new JwtBearerEvents
         {
+            // Браузер передає JWT у HttpOnly cookie (див. AuthCookie); заголовок Authorization теж підтримується
             OnMessageReceived = AuthCookie.ReadToken,
+            // Динамічні права: після перевірки підпису пермішени вантажаться із сервісу даних на кожен запит;
+            // деактивований користувач або відкликаний токен (вихід) -> 401 (див. PermissionClaims)
             OnTokenValidated = PermissionClaims.OnTokenValidated,
         };
     });
 
 // Захист від перебору паролів: ліміт спроб входу з однієї IP (+ блокування облікового запису в сервісі даних)
-LoginRateLimitOptions.AddLoginRateLimiting(builder.Services, builder.Configuration);
+builder.Services.AddLoginRateLimiting(builder.Configuration);
 
 // За зворотним проксі: IP клієнта й HTTPS — із X-Forwarded-* лише від довірених проксі (секція ForwardedHeaders)
 var behindProxy = builder.Services.AddTrustedForwardedHeaders(builder.Configuration);

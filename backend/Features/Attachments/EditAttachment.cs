@@ -7,9 +7,6 @@ using CorrespondenceApi.Infrastructure.Storage;
 using CorrespondenceSystem.Contracts.Attachments;
 using CorrespondenceSystem.Contracts.Common;
 using FluentValidation;
-using ValidationFailure = FluentValidation.Results.ValidationFailure;
-using Microsoft.IdentityModel.JsonWebTokens;
-using Microsoft.IdentityModel.Tokens;
 
 namespace CorrespondenceApi.Features.Attachments;
 
@@ -24,15 +21,12 @@ namespace CorrespondenceApi.Features.Attachments;
 /// .doc редактор конвертує в DOCX, тож збережений файл отримує розширення .docx.
 /// </summary>
 public sealed class DocumentEditorService(
-    DocumentEditorOptions options, OnlyOfficeJwt onlyOfficeJwt, IConfiguration config,
+    DocumentEditorOptions options, OnlyOfficeJwt onlyOfficeJwt, EditorLinkTokens links,
     DataApiClient dataApi, IFileStorage storage, AttachmentContentService content,
     IHttpClientFactory httpFactory, ILogger<DocumentEditorService> logger)
 {
     /// <summary>Розширення, які можна редагувати.</summary>
     public static readonly HashSet<string> Editable = new(StringComparer.OrdinalIgnoreCase) { ".doc", ".docx" };
-
-    private const string LinkAudience = "document-editor";
-    private static readonly JsonWebTokenHandler Handler = new();
 
     public sealed record EditorConfig(string DocumentServerUrl, object Config);
 
@@ -42,17 +36,17 @@ public sealed class DocumentEditorService(
         CancellationToken ct)
     {
         if (!options.IsConfigured)
-            throw new ValidationException([new ValidationFailure("Editor", "Редактор документів не налаштовано")]);
+            throw Errors.Validation("Editor", "Редактор документів не налаштовано");
 
         // Перевірка доступу до документа — від імені поточного користувача
         var file = await dataApi.SendAsync(new GetAttachmentFile.Query(attachmentId), userId, ct);
         var ext = Path.GetExtension(file.FileName);
         if (!Editable.Contains(ext))
-            throw new ValidationException([new ValidationFailure("File", $"Редагування файлів «{ext}» не підтримується")]);
+            throw Errors.Validation("File", $"Редагування файлів «{ext}» не підтримується");
 
         var key = DocumentKey(attachmentId, file.StorageKey);
         var baseUrl = options.CallbackBaseUrl.TrimEnd('/');
-        var fileUrl = $"{baseUrl}/api/editor/attachments/{attachmentId}/file?t={CreateLinkToken(attachmentId, userId, key, TimeSpan.FromHours(24))}";
+        var fileUrl = $"{baseUrl}/api/editor/attachments/{attachmentId}/file?t={links.Create(attachmentId, userId, key, TimeSpan.FromHours(24))}";
 
         var editorConfig = new Dictionary<string, object?>
         {
@@ -67,7 +61,7 @@ public sealed class DocumentEditorService(
         if (canEdit)
             // Callback може прийти через години після відкриття (коли всі закриють документ)
             editorConfig["callbackUrl"] =
-                $"{baseUrl}/api/editor/attachments/{attachmentId}/callback?t={CreateLinkToken(attachmentId, userId, key, TimeSpan.FromDays(30))}";
+                $"{baseUrl}/api/editor/attachments/{attachmentId}/callback?t={links.Create(attachmentId, userId, key, TimeSpan.FromDays(30))}";
 
         var payload = new Dictionary<string, object?>
         {
@@ -94,7 +88,7 @@ public sealed class DocumentEditorService(
 
     public async Task<EditorFile> OpenFileAsync(int attachmentId, string? token, CancellationToken ct)
     {
-        var link = await ValidateLinkTokenAsync(token, attachmentId)
+        var link = await links.ValidateAsync(token, attachmentId)
                    ?? throw new UnauthorizedException("Недійсне посилання на файл");
         var file = await dataApi.SendAsync(new GetAttachmentFile.Query(attachmentId), link.UserId, ct);
         if (DocumentKey(attachmentId, file.StorageKey) != link.Key)
@@ -119,7 +113,7 @@ public sealed class DocumentEditorService(
     public async Task<int> HandleCallbackAsync(int attachmentId, string? token, HttpRequest request,
         CancellationToken ct)
     {
-        var link = await ValidateLinkTokenAsync(token, attachmentId);
+        var link = await links.ValidateAsync(token, attachmentId);
         if (link is null)
         {
             logger.LogWarning("Callback редактора для вкладення #{Id}: недійсне посилання", attachmentId);
@@ -274,36 +268,4 @@ public sealed class DocumentEditorService(
     /// </summary>
     private static string DocumentKey(int attachmentId, string storageKey) =>
         $"{attachmentId}-{Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(storageKey)))[..24]}";
-
-    // ---- Підписані посилання для Document Server (файл і callback) ----
-
-    private sealed record LinkToken(int UserId, string Key);
-
-    private SymmetricSecurityKey LinkKey => new(Encoding.UTF8.GetBytes(config["Jwt:Key"]!));
-
-    private string CreateLinkToken(int attachmentId, int userId, string key, TimeSpan lifetime) =>
-        Handler.CreateToken(new SecurityTokenDescriptor
-        {
-            Audience = LinkAudience,
-            Issuer = config["Jwt:Issuer"],
-            Expires = DateTime.UtcNow.Add(lifetime),
-            Claims = new Dictionary<string, object> { ["att"] = attachmentId, ["uid"] = userId, ["key"] = key },
-            SigningCredentials = new SigningCredentials(LinkKey, SecurityAlgorithms.HmacSha256),
-        });
-
-    private async Task<LinkToken?> ValidateLinkTokenAsync(string? token, int attachmentId)
-    {
-        if (string.IsNullOrEmpty(token)) return null;
-        var result = await Handler.ValidateTokenAsync(token, new TokenValidationParameters
-        {
-            IssuerSigningKey = LinkKey,
-            ValidAudience = LinkAudience,
-            ValidIssuer = config["Jwt:Issuer"],
-        });
-        if (!result.IsValid || result.SecurityToken is not JsonWebToken jwt) return null;
-        if (!jwt.TryGetPayloadValue<int>("att", out var att) || att != attachmentId) return null;
-        if (!jwt.TryGetPayloadValue<int>("uid", out var uid) || !jwt.TryGetPayloadValue<string>("key", out var key))
-            return null;
-        return new LinkToken(uid, key);
-    }
 }

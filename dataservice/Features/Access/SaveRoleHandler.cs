@@ -1,7 +1,6 @@
 using CorrespondenceSystem.Contracts.Access;
 using CorrespondenceSystem.Contracts.Access.Dtos;
 using CorrespondenceSystem.DataService.Infrastructure.Database;
-using FluentValidation;
 using MediatR;
 
 namespace CorrespondenceSystem.DataService.Features.Access;

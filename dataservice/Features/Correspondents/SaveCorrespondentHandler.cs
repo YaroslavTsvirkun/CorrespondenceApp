@@ -3,8 +3,6 @@ using CorrespondenceSystem.Contracts.Correspondents;
 using CorrespondenceSystem.Contracts.Correspondents.Dtos;
 using CorrespondenceSystem.DataService.Common;
 using CorrespondenceSystem.DataService.Infrastructure.Database;
-using FluentValidation;
-using FluentValidation.Results;
 using MediatR;
 
 namespace CorrespondenceSystem.DataService.Features.Correspondents;
@@ -21,7 +19,7 @@ public sealed class SaveCorrespondentHandler(Db db, ICurrentUser user) : IReques
         if (c.Id is null)
         {
             var orgId = user.OrganizationId
-                ?? throw new ValidationException([new ValidationFailure("organization", "Створення доступне лише в межах організації")]);
+                ?? throw Errors.Validation("organization", "Створення доступне лише в межах організації");
             p.Add("OrganizationId", orgId);
             return await db.ScalarAsync<int>("""
                 INSERT dbo.Correspondent (OrganizationId, CorrespondentTypeId, Name, Address, Phone, Email, ContactPerson, Note)

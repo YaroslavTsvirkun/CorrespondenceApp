@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
-  App, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
+  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, UserOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { useApiData } from '../hooks/useApi';
+import { useCrud } from '../hooks/useCrud';
 
 interface UserDto {
   id: number; userName: string; fullName: string;
@@ -18,29 +20,18 @@ interface RoleOpt { id: number; name: string; isSuper: boolean; }
 interface EmpOpt { id: number; fullName: string; departmentName: string; organizationId: number; }
 interface Options { isSuperAdmin: boolean; organizations: OrgOpt[]; roles: RoleOpt[]; employees: EmpOpt[]; }
 
+const EMPTY_OPTIONS: Options = { isSuperAdmin: false, organizations: [], roles: [], employees: [] };
+const loadOptions = () => api<Options>('/api/users/options');
+
 export default function UsersPage() {
-  const { message } = App.useApp();
   const { user: me } = useAuth();
-  const [rows, setRows] = useState<UserDto[]>([]);
-  const [opts, setOpts] = useState<Options>({ isSuperAdmin: false, organizations: [], roles: [], employees: [] });
-  const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<UserDto | null>(null);
   const [form] = Form.useForm();
   const orgId = Form.useWatch('organizationId', form);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [u, o] = await Promise.all([
-        api<UserDto[]>('/api/users'),
-        api<Options>('/api/users/options'),
-      ]);
-      setRows(u); setOpts(o);
-    } catch (e) { message.error((e as Error).message); }
-    finally { setLoading(false); }
-  }, [message]);
-  useEffect(() => { load(); }, [load]);
+  const { rows, loading, save, remove } = useCrud<UserDto>('/api/users');
+  const { data: opts } = useApiData(loadOptions, EMPTY_OPTIONS);
 
   const roleIdByName = useMemo(
     () => new Map(opts.roles.map((r) => [r.name, r.id])),
@@ -73,17 +64,7 @@ export default function UsersPage() {
   };
   const submit = async () => {
     const v = await form.validateFields();
-    try {
-      const payload = { ...v, password: v.password ? v.password : null };
-      const body = JSON.stringify(payload);
-      if (editing) await api(`/api/users/${editing.id}`, { method: 'PUT', body });
-      else await api('/api/users', { method: 'POST', body });
-      setOpen(false); message.success('Збережено'); load();
-    } catch (e) { message.error((e as Error).message); }
-  };
-  const remove = async (id: number) => {
-    try { await api(`/api/users/${id}`, { method: 'DELETE' }); message.success('Видалено'); load(); }
-    catch (e) { message.error((e as Error).message); }
+    if (await save(editing?.id, { ...v, password: v.password ? v.password : null })) setOpen(false);
   };
 
   const columns: ColumnsType<UserDto> = [

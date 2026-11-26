@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { App, Button, Popconfirm, Space, Table, Typography, Upload } from 'antd';
 import {
   DeleteOutlined, DownloadOutlined, EditOutlined, EyeOutlined, HistoryOutlined, InboxOutlined, PaperClipOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api, apiDownload, apiUpload } from '../api/client';
+import { errorMessage, useApiAction, useApiData } from '../hooks/useApi';
 import AttachmentViewer from './AttachmentViewer';
 import AttachmentVersions from './AttachmentVersions';
 import DocumentEditor from './DocumentEditor';
@@ -25,25 +26,15 @@ const ACCEPT = [
 /** Вкладення документа: список, завантаження (drag-and-drop), перегляд, редагування Word, версії, видалення. */
 export default function AttachmentsPanel({ documentId, canEdit }: { documentId: number; canEdit: boolean }) {
   const { message } = App.useApp();
-  const [items, setItems] = useState<Attachment[]>([]);
-  const [loading, setLoading] = useState(false);
+  const run = useApiAction();
   const [uploading, setUploading] = useState(0);
   const [viewing, setViewing] = useState<Attachment | null>(null);
   const [editing, setEditing] = useState<Attachment | null>(null);
   const [history, setHistory] = useState<Attachment | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setItems(await api<Attachment[]>(`/api/documents/${documentId}/attachments`));
-    } catch (e) {
-      message.error((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [documentId, message]);
-
-  useEffect(() => { load(); }, [load]);
+  const loadItems = useCallback(
+    () => api<Attachment[]>(`/api/documents/${documentId}/attachments`), [documentId]);
+  const { data: items, loading, reload } = useApiData(loadItems, []);
 
   const upload = async (file: File) => {
     setUploading((n) => n + 1);
@@ -52,39 +43,27 @@ export default function AttachmentsPanel({ documentId, canEdit }: { documentId: 
       form.append('file', file);
       await apiUpload(`/api/documents/${documentId}/attachments`, form);
       message.success(`Файл «${file.name}» додано`);
-      await load();
+      reload();
     } catch (e) {
-      message.error(`«${file.name}»: ${(e as Error).message}`);
+      message.error(`«${file.name}»: ${errorMessage(e)}`);
     } finally {
       setUploading((n) => n - 1);
     }
   };
 
-  const download = async (a: Attachment) => {
-    try {
-      await apiDownload(`/api/attachments/${a.id}/content`, a.fileName);
-    } catch (e) {
-      message.error((e as Error).message);
-    }
-  };
+  const download = (a: Attachment) => run(() => apiDownload(`/api/attachments/${a.id}/content`, a.fileName));
 
   // Document Server зберігає файл через ~10 с після закриття редактора — оновлюємо список із затримкою
   const editorClosed = (changed: boolean) => {
     setEditing(null);
     if (!changed) return;
     message.info('Зміни зберігаються — список вкладень оновиться за кілька секунд');
-    setTimeout(() => void load(), 12_000);
-    setTimeout(() => void load(), 30_000);
+    setTimeout(reload, 12_000);
+    setTimeout(reload, 30_000);
   };
 
   const remove = async (a: Attachment) => {
-    try {
-      await api(`/api/attachments/${a.id}`, { method: 'DELETE' });
-      message.success('Вкладення видалено');
-      await load();
-    } catch (e) {
-      message.error((e as Error).message);
-    }
+    if (await run(() => api(`/api/attachments/${a.id}`, { method: 'DELETE' }), 'Вкладення видалено')) reload();
   };
 
   return (
@@ -152,7 +131,7 @@ export default function AttachmentsPanel({ documentId, canEdit }: { documentId: 
         onDownload={() => viewing && download(viewing)} />
       <DocumentEditor attachment={editing} onClose={editorClosed} />
       <AttachmentVersions attachment={history} canEdit={canEdit} onClose={() => setHistory(null)}
-        onRestored={() => void load()} />
+        onRestored={reload} />
     </>
   );
 }

@@ -1,31 +1,30 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
-  App, Button, Card, Checkbox, Drawer, Form, Input, Popconfirm, Space, Table, Tag, Typography,
+  Button, Card, Checkbox, Drawer, Form, Input, Popconfirm, Space, Table, Tag, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { api } from '../api/client';
 import { useAuth } from '../auth/AuthContext';
+import { P } from '../auth/permissions';
+import { useApiData } from '../hooks/useApi';
+import { useCrud } from '../hooks/useCrud';
 
 interface RoleDto { id: number; name: string; description?: string; userCount: number; permissions: string[]; }
 interface PermDto { code: string; description?: string; category?: string; }
 
+const loadPermissions = () => api<PermDto[]>('/api/access/permissions');
+
 export default function AccessPage() {
-  const { message } = App.useApp();
   // Ролі спільні для всіх організацій — змінювати їх може лише супер-адміністратор
-  const canManageRoles = useAuth().can('organizations.manage');
-  const [roles, setRoles] = useState<RoleDto[]>([]);
-  const [perms, setPerms] = useState<PermDto[]>([]);
+  const canManageRoles = useAuth().can(P.organizations);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<RoleDto | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [form] = Form.useForm();
 
-  const load = async () => {
-    setRoles(await api<RoleDto[]>('/api/access/roles'));
-    setPerms(await api<PermDto[]>('/api/access/permissions'));
-  };
-  useEffect(() => { load().catch((e) => message.error((e as Error).message)); }, []); // eslint-disable-line
+  const { rows: roles, save: saveRole, remove: removeRole } = useCrud<RoleDto>('/api/access/roles');
+  const { data: perms } = useApiData(loadPermissions, []);
 
   const grouped = useMemo(() => {
     const g: Record<string, PermDto[]> = {};
@@ -42,18 +41,11 @@ export default function AccessPage() {
 
   const save = async () => {
     const v = await form.validateFields();
-    const body = JSON.stringify({ name: v.name, description: v.description, permissions: selected });
-    if (editing) await api(`/api/access/roles/${editing.id}`, { method: 'PUT', body });
-    else await api('/api/access/roles', { method: 'POST', body });
-    setOpen(false);
-    message.success(editing ? 'Роль оновлено' : 'Роль створено');
-    await load();
+    const values = { name: v.name, description: v.description, permissions: selected };
+    if (await saveRole(editing?.id, values, editing ? 'Роль оновлено' : 'Роль створено')) setOpen(false);
   };
 
-  const remove = async (r: RoleDto) => {
-    try { await api(`/api/access/roles/${r.id}`, { method: 'DELETE' }); message.success('Роль видалено'); await load(); }
-    catch (e) { message.error((e as Error).message); }
-  };
+  const remove = (r: RoleDto) => removeRole(r.id, 'Роль видалено');
 
   const columns: ColumnsType<RoleDto> = [
     { title: 'Роль', dataIndex: 'name', width: 180, render: (v) => <b>{v}</b> },

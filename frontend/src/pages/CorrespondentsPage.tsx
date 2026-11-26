@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
-  App, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Typography,
+  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Table, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { api } from '../api/client';
-import { useLookups, opt } from '../data/lookups';
-import { useAuth, P } from '../auth/AuthContext';
+import { useLookups } from '../data/lookups';
+import { opt } from '../data/options';
+import { useAuth } from '../auth/AuthContext';
+import { P } from '../auth/permissions';
+import { useCrud } from '../hooks/useCrud';
 
 interface Dto {
   id: number; name: string; correspondentTypeId: number; typeName: string;
@@ -14,24 +16,15 @@ interface Dto {
 }
 
 export default function CorrespondentsPage() {
-  const { message } = App.useApp();
   const { lookups } = useLookups();
   const { can } = useAuth();
   const editable = can(P.correspondents);
-  const [rows, setRows] = useState<Dto[]>([]);
-  const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Dto | null>(null);
   const [form] = Form.useForm();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try { setRows(await api<Dto[]>('/api/correspondents')); }
-    catch (e) { message.error((e as Error).message); }
-    finally { setLoading(false); }
-  }, [message]);
-  useEffect(() => { load(); }, [load]);
+  const { rows, loading, save, remove } = useCrud<Dto>('/api/correspondents');
 
   const data = rows.filter((c) => c.name.toLowerCase().includes(search.trim().toLowerCase()));
 
@@ -39,16 +32,7 @@ export default function CorrespondentsPage() {
   const openEdit = (c: Dto) => { setEditing(c); form.setFieldsValue(c); setOpen(true); };
   const submit = async () => {
     const v = await form.validateFields();
-    try {
-      const body = JSON.stringify(v);
-      if (editing) await api(`/api/correspondents/${editing.id}`, { method: 'PUT', body });
-      else await api('/api/correspondents', { method: 'POST', body });
-      setOpen(false); message.success('Збережено'); load();
-    } catch (e) { message.error((e as Error).message); }
-  };
-  const remove = async (id: number) => {
-    try { await api(`/api/correspondents/${id}`, { method: 'DELETE' }); message.success('Видалено'); load(); }
-    catch (e) { message.error((e as Error).message); }
+    if (await save(editing?.id, v)) setOpen(false);
   };
 
   const columns: ColumnsType<Dto> = [

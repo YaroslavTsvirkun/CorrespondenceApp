@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
-  App, Button, Card, DatePicker, Descriptions, Drawer, Form, Input, InputNumber,
+  Button, Card, DatePicker, Descriptions, Drawer, Form, Input, InputNumber,
   Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
 } from 'antd';
 import {
@@ -10,25 +10,26 @@ import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import type { SorterResult } from 'antd/es/table/interface';
 import dayjs from 'dayjs';
 import { api } from '../api/client';
-import { useLookups, opt } from '../data/lookups';
-import { useAuth, P } from '../auth/AuthContext';
+import { useLookups } from '../data/lookups';
+import { opt } from '../data/options';
+import { useAuth } from '../auth/AuthContext';
+import { P } from '../auth/permissions';
 import AttachmentsPanel from '../components/AttachmentsPanel';
-
-export function statusColor(name: string): string {
-  switch (name) {
-    case 'Зареєстровано': return 'blue';
-    case 'На розгляді': return 'gold';
-    case 'На виконанні': return 'orange';
-    case 'Виконано': return 'green';
-    case 'Архівовано': return 'default';
-    default: return 'default';
-  }
-}
+import { statusColor } from '../data/statusColors';
+import { useApiAction, useApiData } from '../hooks/useApi';
 
 interface ListItem {
   id: number; registrationNumber: string; registrationYear: number; direction: string;
   documentType: string; title: string; correspondent?: string; documentDate: string;
   status: string; isControlled: boolean;
+}
+/** Картка документа (DocumentDetail у contracts/Documents/Dtos). */
+interface DocDetail {
+  id: number; registrationNumber: string; registrationYear: number; registeredAt: string; registrar: string;
+  direction: string; documentType: string; status: string; isControlled: boolean;
+  channel?: string; correspondent?: string; senderDepartment?: string; receiverDepartment?: string;
+  author?: string; title: string; summary?: string; documentDate: string; incomingNumber?: string; note?: string;
+  tasks: { id: number; executor: string; taskText: string; dueDate: string; status: string; completedAt?: string }[];
 }
 interface Paged { items: ListItem[]; total: number; page: number; pageSize: number; }
 interface DocInput {
@@ -43,12 +44,10 @@ const { RangePicker } = DatePicker;
 const PAGE_SIZE = 8;
 
 export default function DocumentsPage() {
-  const { message } = App.useApp();
+  const run = useApiAction();
   const { lookups } = useLookups();
   const { can } = useAuth();
 
-  const [data, setData] = useState<Paged>({ items: [], total: 0, page: 1, pageSize: PAGE_SIZE });
-  const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [fDirection, setFDirection] = useState<number>();
@@ -61,11 +60,10 @@ export default function DocumentsPage() {
 
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [viewing, setViewing] = useState<Record<string, unknown> | null>(null);
+  const [viewing, setViewing] = useState<DocDetail | null>(null);
   const [form] = Form.useForm();
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(() => {
     const p = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE), desc: String(desc) });
     if (search.trim()) p.set('search', search.trim());
     if (fDirection) p.set('directionId', String(fDirection));
@@ -74,12 +72,9 @@ export default function DocumentsPage() {
     if (fControlled !== undefined) p.set('isControlled', String(fControlled));
     if (sortBy) p.set('sortBy', sortBy);
     if (fRange) { p.set('dateFrom', fRange[0].format('YYYY-MM-DD')); p.set('dateTo', fRange[1].format('YYYY-MM-DD')); }
-    try { setData(await api<Paged>(`/api/documents?${p.toString()}`)); }
-    catch (e) { message.error((e as Error).message); }
-    finally { setLoading(false); }
-  }, [page, search, fDirection, fType, fStatus, fControlled, fRange, sortBy, desc, message]);
-
-  useEffect(() => { load(); }, [load]);
+    return api<Paged>(`/api/documents?${p.toString()}`);
+  }, [page, search, fDirection, fType, fStatus, fControlled, fRange, sortBy, desc]);
+  const { data, loading, reload } = useApiData(load, { items: [], total: 0, page: 1, pageSize: PAGE_SIZE } as Paged);
 
   const filtersActive = !!(search || fDirection || fType || fStatus || fControlled !== undefined || fRange);
   const clearFilters = () => {
@@ -92,28 +87,24 @@ export default function DocumentsPage() {
     form.setFieldsValue({ registrationYear: dayjs().year(), documentDate: dayjs(), isControlled: false });
     setOpen(true);
   };
-  const openEdit = async (row: ListItem) => {
-    try {
-      const input = await api<DocInput>(`/api/documents/${row.id}/edit`);
-      setEditingId(row.id);
-      form.setFieldsValue({ ...input, documentDate: dayjs(input.documentDate) });
-      setOpen(true);
-    } catch (e) { message.error((e as Error).message); }
-  };
+  const openEdit = (row: ListItem) => run(async () => {
+    const input = await api<DocInput>(`/api/documents/${row.id}/edit`);
+    setEditingId(row.id);
+    form.setFieldsValue({ ...input, documentDate: dayjs(input.documentDate) });
+    setOpen(true);
+  });
   const submit = async () => {
     const v = await form.validateFields();
     const body = JSON.stringify({ ...v, documentDate: (v.documentDate as dayjs.Dayjs).format('YYYY-MM-DD') });
-    try {
-      if (editingId) await api(`/api/documents/${editingId}`, { method: 'PUT', body });
-      else await api('/api/documents', { method: 'POST', body });
-      setOpen(false);
-      message.success(editingId ? 'Документ оновлено' : 'Документ додано');
-      load();
-    } catch (e) { message.error((e as Error).message); }
+    const saved = await run(
+      () => editingId
+        ? api(`/api/documents/${editingId}`, { method: 'PUT', body })
+        : api('/api/documents', { method: 'POST', body }),
+      editingId ? 'Документ оновлено' : 'Документ додано');
+    if (saved) { setOpen(false); reload(); }
   };
   const remove = async (id: number) => {
-    try { await api(`/api/documents/${id}`, { method: 'DELETE' }); message.success('Документ видалено'); load(); }
-    catch (e) { message.error((e as Error).message); }
+    if (await run(() => api(`/api/documents/${id}`, { method: 'DELETE' }), 'Документ видалено')) reload();
   };
 
   // Підбір наступного реєстраційного номера за патерном організації
@@ -129,9 +120,8 @@ export default function DocumentsPage() {
   const genNumber = () => fetchNumber(
     form.getFieldValue('directionId'), form.getFieldValue('documentTypeId'),
     form.getFieldValue('registrationYear'));
-  const openView = async (row: ListItem) => {
-    try { setViewing(await api(`/api/documents/${row.id}`)); } catch (e) { message.error((e as Error).message); }
-  };
+  const openView = (row: ListItem) =>
+    run(async () => setViewing(await api<DocDetail>(`/api/documents/${row.id}`)));
 
   const onTableChange = (
     pg: TablePaginationConfig, _f: unknown,
@@ -257,13 +247,13 @@ export default function DocumentsPage() {
       <Drawer open={!!viewing} size="large" onClose={() => setViewing(null)}
         title={viewing ? `Картка документа № ${viewing.registrationNumber}` : ''}>
         {viewing && <DocCard d={viewing} />}
-        {viewing && <AttachmentsPanel documentId={viewing.id as number} canEdit={can(P.docsUpdate)} />}
+        {viewing && <AttachmentsPanel documentId={viewing.id} canEdit={can(P.docsUpdate)} />}
       </Drawer>
     </>
   );
 }
 
-function DocCard({ d }: { d: Record<string, any> }) { // eslint-disable-line @typescript-eslint/no-explicit-any
+function DocCard({ d }: { d: DocDetail }) {
   return (
     <>
       <Descriptions bordered column={1} size="small">

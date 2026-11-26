@@ -2,8 +2,6 @@ using CorrespondenceSystem.Contracts.Common;
 using CorrespondenceSystem.Contracts.Employees;
 using CorrespondenceSystem.DataService.Common;
 using CorrespondenceSystem.DataService.Infrastructure.Database;
-using FluentValidation;
-using FluentValidation.Results;
 using MediatR;
 using Microsoft.Data.SqlClient;
 
@@ -24,8 +22,7 @@ public sealed class DeleteEmployeeHandler(Db db, ICurrentUser user) : IRequestHa
         }
         catch (SqlException ex) when (SqlErrors.IsReferenceViolation(ex))
         {
-            throw new ValidationException(
-                [new ValidationFailure("employee", "Працівник використовується в документах/дорученнях — видалення заборонено")]);
+            throw Errors.Validation("employee", "Працівник використовується в документах/дорученнях — видалення заборонено");
         }
     }
 }

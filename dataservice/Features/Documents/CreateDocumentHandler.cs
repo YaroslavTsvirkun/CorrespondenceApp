@@ -4,7 +4,6 @@ using CorrespondenceSystem.Contracts.Documents.Dtos;
 using CorrespondenceSystem.DataService.Common;
 using CorrespondenceSystem.DataService.Infrastructure.Database;
 using Dapper;
-using FluentValidation;
 using MediatR;
 
 namespace CorrespondenceSystem.DataService.Features.Documents;

@@ -3,7 +3,6 @@ using CorrespondenceSystem.Contracts.Documents;
 using CorrespondenceSystem.Contracts.Documents.Dtos;
 using CorrespondenceSystem.DataService.Common;
 using CorrespondenceSystem.DataService.Infrastructure.Database;
-using FluentValidation;
 using MediatR;
 
 namespace CorrespondenceSystem.DataService.Features.Documents;

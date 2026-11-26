@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
-  App, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
+  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { api } from '../api/client';
-import { useAuth, P } from '../auth/AuthContext';
+import { useAuth } from '../auth/AuthContext';
+import { P } from '../auth/permissions';
+import { useApiData } from '../hooks/useApi';
+import { useCrud } from '../hooks/useCrud';
+import { useExpandAll } from '../hooks/useExpandAll';
 
 interface Dto {
   id: number; name: string; shortName?: string; description?: string; isActive: boolean;
@@ -26,30 +30,20 @@ function buildTree(rows: Dto[]): TreeRow[] {
 }
 
 export default function DepartmentsPage() {
-  const { message } = App.useApp();
   const { can } = useAuth();
   const editable = can(P.departments);
   const isSuper = can(P.organizations); // супер-адмін бачить усі організації
-  const [rows, setRows] = useState<Dto[]>([]);
-  const [orgs, setOrgs] = useState<OrgOpt[]>([]);
-  const [expandedKeys, setExpandedKeys] = useState<number[]>([]);
-  const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Dto | null>(null);
   const [form] = Form.useForm();
   const formOrgId = Form.useWatch('organizationId', form);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await api<Dto[]>('/api/departments');
-      setRows(data);
-      setExpandedKeys(data.map((d) => d.id)); // дерево розгорнуте за замовчуванням
-      if (isSuper) setOrgs(await api<OrgOpt[]>('/api/organizations'));
-    } catch (e) { message.error((e as Error).message); }
-    finally { setLoading(false); }
-  }, [message, isSuper]);
-  useEffect(() => { load(); }, [load]);
+  const { rows, loading, save, remove } = useCrud<Dto>('/api/departments');
+  // Список організацій для вибору — лише супер-адміну
+  const loadOrgs = useCallback(
+    () => (isSuper ? api<OrgOpt[]>('/api/organizations') : Promise.resolve<OrgOpt[]>([])), [isSuper]);
+  const { data: orgs } = useApiData(loadOrgs, []);
+  const expansion = useExpandAll(useMemo(() => rows.map((r) => r.id), [rows]));
 
   const tree = useMemo(() => buildTree(rows), [rows]);
   const showOrg = isSuper && new Set(rows.map((r) => r.organizationId)).size > 1;
@@ -77,16 +71,7 @@ export default function DepartmentsPage() {
   };
   const submit = async () => {
     const v = await form.validateFields();
-    try {
-      const body = JSON.stringify(v);
-      if (editing) await api(`/api/departments/${editing.id}`, { method: 'PUT', body });
-      else await api('/api/departments', { method: 'POST', body });
-      setOpen(false); message.success('Збережено'); load();
-    } catch (e) { message.error((e as Error).message); }
-  };
-  const remove = async (id: number) => {
-    try { await api(`/api/departments/${id}`, { method: 'DELETE' }); message.success('Видалено'); load(); }
-    catch (e) { message.error((e as Error).message); }
+    if (await save(editing?.id, v)) setOpen(false);
   };
 
   const columns: ColumnsType<TreeRow> = [
@@ -127,7 +112,7 @@ export default function DepartmentsPage() {
         </div>
         <Table<TreeRow> rowKey="id" columns={columns} dataSource={tree} size="middle" loading={loading}
           pagination={false}
-          expandable={{ expandedRowKeys: expandedKeys, onExpandedRowsChange: (k) => setExpandedKeys(k as number[]), indentSize: 24 }} />
+          expandable={{ ...expansion, indentSize: 24 }} />
       </Card>
 
       <Modal open={open} title={editing ? 'Редагування підрозділу' : 'Новий підрозділ'}

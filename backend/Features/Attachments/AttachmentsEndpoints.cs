@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using CorrespondenceApi.Common;
 using CorrespondenceApi.Infrastructure.Storage;
 using CorrespondenceApi.Features.Attachments;
 using CorrespondenceSystem.Contracts.Attachments;
@@ -73,10 +74,8 @@ public static class AttachmentsEndpoints
         g.MapGet("/{id:int}/editor", async (DocumentEditorService editor, ClaimsPrincipal user, int id,
                 CancellationToken ct) =>
             {
-                var userId = int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-                var name = user.FindFirstValue("fullName") ?? user.Identity?.Name ?? "";
-                var canEdit = user.HasClaim("permission", Permissions.DocumentsUpdate);
-                return Results.Ok(await editor.GetConfigAsync(id, userId, name, canEdit, ct));
+                var canEdit = user.HasPermission(Permissions.DocumentsUpdate);
+                return Results.Ok(await editor.GetConfigAsync(id, user.GetUserId(), user.DisplayName(), canEdit, ct));
             })
             .RequireAuthorization(Permissions.DocumentsReadAny);
 
@@ -98,8 +97,7 @@ public static class AttachmentsEndpoints
         g.MapPost("/{id:int}/versions/{versionId:int}/restore", async (ISender m, ClaimsPrincipal user, int id,
                 int versionId, CancellationToken ct) =>
             {
-                var userId = int.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-                await m.Send(new RestoreAttachmentVersion.Command(id, versionId, userId), ct);
+                await m.Send(new RestoreAttachmentVersion.Command(id, versionId, user.GetUserId()), ct);
                 return Results.NoContent();
             })
             .RequireAuthorization(Permissions.DocumentsUpdate);

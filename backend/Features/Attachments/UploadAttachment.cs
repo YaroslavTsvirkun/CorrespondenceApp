@@ -46,8 +46,7 @@ public static class UploadAttachment
 
             var fileName = AttachmentFiles.SafeFileName(c.File.FileName);
             var contentType = AttachmentFiles.ContentTypeFor(fileName);
-            var now = DateTime.UtcNow;
-            var key = $"{organizationId}/{now:yyyy}/{now:MM}/{Guid.NewGuid():N}";
+            var key = AttachmentFiles.NewStorageKey(organizationId);
 
             await using var stream = c.File.OpenReadStream();
             var sha256 = await SHA256.HashDataAsync(stream, ct);

@@ -1,6 +1,6 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Net;
 using System.Security.Claims;
+using CorrespondenceApi.Common;
 using CorrespondenceApi.Infrastructure.DataService;
 using CorrespondenceSystem.Contracts.Auth;
 using CorrespondenceSystem.Contracts.Auth.Dtos;
@@ -18,8 +18,7 @@ public static class PermissionClaims
 {
     public static async Task OnTokenValidated(TokenValidatedContext ctx)
     {
-        if (ctx.Principal?.Identity is not ClaimsIdentity identity
-            || !int.TryParse(ctx.Principal.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var userId))
+        if (ctx.Principal?.Identity is not ClaimsIdentity identity || ctx.Principal.FindUserId() is not int userId)
         {
             ctx.Fail("Токен без ідентифікатора користувача");
             return;
@@ -31,7 +30,7 @@ public static class PermissionClaims
         try
         {
             // Принципал ще не встановлено в HttpContext — користувача передаємо явно
-            user = await dataApi.SendAsync(new Me.Query(TokenId(ctx.Principal)), userId, ct);
+            user = await dataApi.SendAsync(new Me.Query(ctx.Principal.FindTokenId()), userId, ct);
         }
         catch (DataApiException e) when (e.StatusCode == HttpStatusCode.Unauthorized)
         {
@@ -45,14 +44,10 @@ public static class PermissionClaims
             return;
         }
 
-        if (user.EmployeeId is int eid) identity.AddClaim(new Claim("employeeId", eid.ToString()));
-        if (user.DepartmentId is int did) identity.AddClaim(new Claim("departmentId", did.ToString()));
-        if (user.OrganizationId is int orgId) identity.AddClaim(new Claim("organizationId", orgId.ToString()));
+        if (user.EmployeeId is int eid) identity.AddClaim(new Claim(UserClaims.EmployeeId, eid.ToString()));
+        if (user.DepartmentId is int did) identity.AddClaim(new Claim(UserClaims.DepartmentId, did.ToString()));
+        if (user.OrganizationId is int orgId) identity.AddClaim(new Claim(UserClaims.OrganizationId, orgId.ToString()));
         foreach (var code in user.Permissions)
-            identity.AddClaim(new Claim("permission", code));
+            identity.AddClaim(new Claim(UserClaims.Permission, code));
     }
-
-    /// <summary>Ідентифікатор токена (jti); токени, видані до появи jti, його не мають.</summary>
-    public static string? TokenId(ClaimsPrincipal principal) =>
-        principal.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
 }

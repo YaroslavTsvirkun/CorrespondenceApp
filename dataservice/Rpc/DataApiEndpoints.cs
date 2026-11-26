@@ -36,7 +36,8 @@ public static class DataApiEndpoints
                           ?? throw new BadHttpRequestException("Порожнє тіло запиту");
             var result = await sender.Send(request, ct);
 
-            return DataApi.ResponseType(requestType) is null ? Results.NoContent() : Results.Json(result);
+            // Команда без результату або null-результат — 204 (порожнє тіло клієнт не парсить)
+            return DataApi.ResponseType(requestType) is null || result is null ? Results.NoContent() : Results.Json(result);
         });
     }
 

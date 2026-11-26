@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
-  App, Button, Card, DatePicker, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography,
+  Button, Card, DatePicker, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import dayjs from 'dayjs';
 import { api } from '../api/client';
-import { useLookups, opt } from '../data/lookups';
-import { useAuth, P } from '../auth/AuthContext';
+import { useLookups } from '../data/lookups';
+import { opt } from '../data/options';
+import { useAuth } from '../auth/AuthContext';
+import { P } from '../auth/permissions';
+import { taskColor } from '../data/statusColors';
+import { useApiData } from '../hooks/useApi';
+import { useCrud } from '../hooks/useCrud';
 
 interface Dto {
   id: number; documentId: number; documentNumber: string; documentTitle: string;
@@ -16,19 +21,14 @@ interface Dto {
 }
 interface DocOpt { value: number; label: string; }
 
-function taskColor(name: string): string {
-  switch (name) {
-    case 'Призначено': return 'blue';
-    case 'У роботі': return 'gold';
-    case 'Виконано': return 'green';
-    case 'Прострочено': return 'red';
-    case 'Скасовано': return 'default';
-    default: return 'default';
-  }
-}
+/** Документи для вибору в дорученні (лише видимі користувачу). */
+const loadDocumentOptions = async (): Promise<DocOpt[]> => {
+  const page = await api<{ items: { id: number; registrationNumber: string; registrationYear: number; title: string }[] }>(
+    '/api/documents?pageSize=200');
+  return page.items.map((d) => ({ value: d.id, label: `${d.registrationNumber}/${d.registrationYear} — ${d.title}` }));
+};
 
 export default function TasksPage() {
-  const { message } = App.useApp();
   const { lookups } = useLookups();
   const { user, can, canAny } = useAuth();
   const canEdit = canAny(P.tasksAssign, P.tasksExecute);
@@ -37,24 +37,13 @@ export default function TasksPage() {
   const canEditTask = (t: Dto) => canAssign || (user?.employeeId != null && t.executorEmployeeId === user.employeeId);
   const today = dayjs();
 
-  const [rows, setRows] = useState<Dto[]>([]);
-  const [docs, setDocs] = useState<DocOpt[]>([]);
-  const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Dto | null>(null);
   const lockAssignment = !!editing && !canAssign;
   const [form] = Form.useForm();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      setRows(await api<Dto[]>('/api/tasks'));
-      const dd = await api<{ items: { id: number; registrationNumber: string; registrationYear: number; title: string }[] }>('/api/documents?pageSize=200');
-      setDocs(dd.items.map((d) => ({ value: d.id, label: `${d.registrationNumber}/${d.registrationYear} — ${d.title}` })));
-    } catch (e) { message.error((e as Error).message); }
-    finally { setLoading(false); }
-  }, [message]);
-  useEffect(() => { load(); }, [load]);
+  const { rows, loading, save, remove } = useCrud<Dto>('/api/tasks');
+  const { data: docs } = useApiData(loadDocumentOptions, []);
 
   const isFinal = (statusId: number) => lookups.taskStatuses.find((s) => s.id === statusId)?.isFinal ?? false;
   const isOverdue = (t: Dto) => !isFinal(t.statusId) && dayjs(t.dueDate).isBefore(today, 'day');
@@ -71,20 +60,12 @@ export default function TasksPage() {
   };
   const submit = async () => {
     const v = await form.validateFields();
-    const body = JSON.stringify({
+    const values = {
       ...v,
       dueDate: (v.dueDate as dayjs.Dayjs).format('YYYY-MM-DD'),
       completedAt: v.completedAt ? (v.completedAt as dayjs.Dayjs).format('YYYY-MM-DD') : null,
-    });
-    try {
-      if (editing) await api(`/api/tasks/${editing.id}`, { method: 'PUT', body });
-      else await api('/api/tasks', { method: 'POST', body });
-      setOpen(false); message.success('Збережено'); load();
-    } catch (e) { message.error((e as Error).message); }
-  };
-  const remove = async (id: number) => {
-    try { await api(`/api/tasks/${id}`, { method: 'DELETE' }); message.success('Видалено'); load(); }
-    catch (e) { message.error((e as Error).message); }
+    };
+    if (await save(editing?.id, values)) setOpen(false);
   };
 
   const columns: ColumnsType<Dto> = [

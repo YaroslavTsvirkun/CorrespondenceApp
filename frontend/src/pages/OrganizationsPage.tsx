@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
-  App, Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
+  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ApartmentOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { api } from '../api/client';
+import { useCrud } from '../hooks/useCrud';
+import { useExpandAll } from '../hooks/useExpandAll';
 
 interface Dto {
   id: number; name: string; code?: string; parentOrganizationId?: number | null;
@@ -25,24 +26,12 @@ function buildTree(rows: Dto[]): TreeRow[] {
 }
 
 export default function OrganizationsPage() {
-  const { message } = App.useApp();
-  const [rows, setRows] = useState<Dto[]>([]);
-  const [expandedKeys, setExpandedKeys] = useState<number[]>([]);
-  const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Dto | null>(null);
   const [form] = Form.useForm();
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await api<Dto[]>('/api/organizations');
-      setRows(data);
-      setExpandedKeys(data.map((d) => d.id)); // дерево розгорнуте за замовчуванням
-    } catch (e) { message.error((e as Error).message); }
-    finally { setLoading(false); }
-  }, [message]);
-  useEffect(() => { load(); }, [load]);
+  const { rows, loading, save, remove } = useCrud<Dto>('/api/organizations');
+  const expansion = useExpandAll(useMemo(() => rows.map((r) => r.id), [rows]));
 
   const tree = useMemo(() => buildTree(rows), [rows]);
   // Кандидати в батьки: усі, крім самого себе (захист від циклів — на бекенді)
@@ -64,16 +53,7 @@ export default function OrganizationsPage() {
   };
   const submit = async () => {
     const v = await form.validateFields();
-    try {
-      const body = JSON.stringify(v);
-      if (editing) await api(`/api/organizations/${editing.id}`, { method: 'PUT', body });
-      else await api('/api/organizations', { method: 'POST', body });
-      setOpen(false); message.success('Збережено'); load();
-    } catch (e) { message.error((e as Error).message); }
-  };
-  const remove = async (id: number) => {
-    try { await api(`/api/organizations/${id}`, { method: 'DELETE' }); message.success('Видалено'); load(); }
-    catch (e) { message.error((e as Error).message); }
+    if (await save(editing?.id, v)) setOpen(false);
   };
 
   const columns: ColumnsType<TreeRow> = [
@@ -114,7 +94,7 @@ export default function OrganizationsPage() {
         <Table<TreeRow>
           rowKey="id" columns={columns} dataSource={tree} loading={loading}
           pagination={false} size="middle"
-          expandable={{ expandedRowKeys: expandedKeys, onExpandedRowsChange: (k) => setExpandedKeys(k as number[]), indentSize: 24 }}
+          expandable={{ ...expansion, indentSize: 24 }}
         />
       </Card>
 

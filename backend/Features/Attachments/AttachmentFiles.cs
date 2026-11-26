@@ -8,6 +8,16 @@ public static class AttachmentFiles
     private static readonly FileExtensionContentTypeProvider ContentTypes = CreateProvider();
 
     /// <summary>
+    /// Новий ключ об'єкта у сховищі: {організація}/{рік}/{місяць}/{guid}. Ключ не залежить від імені файлу,
+    /// тож ім'я від клієнта ніколи не потрапляє в шлях у сховищі; новий вміст — завжди новий ключ.
+    /// </summary>
+    public static string NewStorageKey(int organizationId)
+    {
+        var now = DateTime.UtcNow;
+        return $"{organizationId}/{now:yyyy}/{now:MM}/{Guid.NewGuid():N}";
+    }
+
+    /// <summary>
     /// Ім'я файлу без шляху та керувальних символів (браузери/ОС можуть передати повний шлях).
     /// Використовується лише для відображення й Content-Disposition, не як ключ у сховищі.
     /// </summary>

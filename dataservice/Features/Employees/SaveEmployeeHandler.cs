@@ -3,8 +3,6 @@ using CorrespondenceSystem.Contracts.Employees;
 using CorrespondenceSystem.Contracts.Employees.Dtos;
 using CorrespondenceSystem.DataService.Common;
 using CorrespondenceSystem.DataService.Infrastructure.Database;
-using FluentValidation;
-using FluentValidation.Results;
 using MediatR;
 
 namespace CorrespondenceSystem.DataService.Features.Employees;
@@ -23,7 +21,7 @@ public sealed class SaveEmployeeHandler(Db db, ICurrentUser user) : IRequestHand
             SELECT d.OrganizationId FROM dbo.Department d
             WHERE d.Id = @DepartmentId AND {SqlScope.TenantFilter("d")}
             """, p, ct)
-            ?? throw new ValidationException([new ValidationFailure("department", "Підрозділ не знайдено")]);
+            ?? throw Errors.Validation("department", "Підрозділ не знайдено");
         p.Add("OrganizationId", departmentOrg);
 
         if (c.Id is null)

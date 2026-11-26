@@ -19,7 +19,8 @@ import OrganizationsPage from './pages/OrganizationsPage';
 import UsersPage from './pages/UsersPage';
 import SettingsPage from './pages/SettingsPage';
 import LoginPage from './pages/LoginPage';
-import { useAuth, P } from './auth/AuthContext';
+import { useAuth } from './auth/AuthContext';
+import { P } from './auth/permissions';
 
 const { Sider, Header, Content } = Layout;
 

@@ -67,33 +67,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// Хук поруч із провайдером — звичний шаблон контексту; fast refresh тут не страждає
 // eslint-disable-next-line react-refresh/only-export-components
 export function useAuth(): AuthCtx {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error('useAuth must be used within AuthProvider');
   return ctx;
 }
-
-// Коди пермішенів (відповідають бекенду)
-export const P = {
-  docsReadAny: 'documents.read',
-  docsCreate: 'documents.create',
-  docsUpdate: 'documents.update',
-  docsDelete: 'documents.delete',
-  resolutionsCreate: 'resolutions.create',
-  tasksAssign: 'tasks.assign',
-  tasksExecute: 'tasks.execute',
-  correspondents: 'correspondents.manage',
-  dictionaries: 'dictionaries.manage',
-  employees: 'employees.manage',
-  departments: 'departments.manage',
-  reports: 'reports.view',
-  dashOverview: 'dashboard.overview',
-  dashControl: 'dashboard.control',
-  dashMyTasks: 'dashboard.my-tasks',
-  users: 'users.manage',
-  organizations: 'organizations.manage',
-  settings: 'settings.manage',
-  // будь-який скоуп перегляду (для відображення пункту меню «Документи»)
-  docsReadScopes: ['documents.read.all', 'documents.read.department', 'documents.read.involved'],
-} as const;

@@ -3,8 +3,6 @@ using CorrespondenceSystem.Contracts.Departments;
 using CorrespondenceSystem.Contracts.Departments.Dtos;
 using CorrespondenceSystem.DataService.Common;
 using CorrespondenceSystem.DataService.Infrastructure.Database;
-using FluentValidation;
-using FluentValidation.Results;
 using MediatR;
 
 namespace CorrespondenceSystem.DataService.Features.Departments;
@@ -30,7 +28,7 @@ public sealed class SaveDepartmentHandler(Db db, ICurrentUser user) : IRequestHa
         if (c.Id is null)
         {
             var orgId = user.OrganizationId ?? d.OrganizationId
-                ?? throw new ValidationException([new ValidationFailure("organization", "Оберіть організацію")]);
+                ?? throw Errors.Validation("organization", "Оберіть організацію");
             p.Add("OrganizationId", orgId);
             return await db.ScalarAsync<int>("""
                 INSERT dbo.Department (OrganizationId, Name, ShortName, Description, IsActive, ParentDepartmentId)

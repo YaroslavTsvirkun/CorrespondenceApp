@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -9,6 +10,8 @@ const backendTarget =
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  // Модульні тести (npm test): хуки й HTTP-клієнт у jsdom
+  test: { environment: 'jsdom', include: ['src/**/*.test.{ts,tsx}'] },
   server: {
     port: process.env.PORT ? Number(process.env.PORT) : 5180,
     proxy: {

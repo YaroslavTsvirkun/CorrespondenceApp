@@ -3,15 +3,12 @@
   <!-- Спільні контракти backend ↔ DataService: запити (MediatR), DTO, валідатори, каталог пермішенів,
        протокол внутрішнього Data API. Без залежностей від БД. -->
   <PropertyGroup>
-    <TargetFramework>net11.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>CorrespondenceSystem.Contracts</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="FluentValidation" Version="12.2.0" />
-    <PackageReference Include="MediatR" Version="12.5.0" />
+    <PackageReference Include="FluentValidation" />
+    <PackageReference Include="MediatR" />
   </ItemGroup>
 
 </Project>

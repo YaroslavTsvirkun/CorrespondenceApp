@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { App, Button, Modal, Popconfirm, Space, Table } from 'antd';
+import { useCallback } from 'react';
+import { Button, Modal, Popconfirm, Space, Table } from 'antd';
 import { DownloadOutlined, RollbackOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import { api, apiDownload } from '../api/client';
+import { useApiAction, useApiData } from '../hooks/useApi';
 import { formatSize } from './attachmentPreview';
 
 interface Version {
@@ -30,45 +31,19 @@ export default function AttachmentVersions({ attachment, canEdit, onClose, onRes
 }
 
 function VersionsTable({ attachment, canEdit, onRestored }: { attachment: FileRef; canEdit: boolean; onRestored: () => void }) {
-  const { message } = App.useApp();
-  const [items, setItems] = useState<Version[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [revision, setRevision] = useState(0); // збільшується після відновлення -> перезавантаження списку
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await api<Version[]>(`/api/attachments/${attachment.id}/versions`);
-        if (!cancelled) setItems(list);
-      } catch (e) {
-        if (!cancelled) message.error((e as Error).message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [attachment.id, message, revision]);
+  const run = useApiAction();
+  const loadVersions = useCallback(
+    () => api<Version[]>(`/api/attachments/${attachment.id}/versions`), [attachment.id]);
+  const { data: items, loading, reload } = useApiData(loadVersions, []);
 
   const restore = async (v: Version) => {
-    try {
-      await api(`/api/attachments/${attachment.id}/versions/${v.id}/restore`, { method: 'POST' });
-      message.success(`Відновлено версію ${v.versionNo}`);
-      onRestored();
-      setLoading(true);
-      setRevision((r) => r + 1);
-    } catch (e) {
-      message.error((e as Error).message);
-    }
+    const restored = await run(
+      () => api(`/api/attachments/${attachment.id}/versions/${v.id}/restore`, { method: 'POST' }),
+      `Відновлено версію ${v.versionNo}`);
+    if (restored) { onRestored(); reload(); }
   };
 
-  const download = async (v: Version) => {
-    try {
-      await apiDownload(`/api/attachments/${attachment.id}/versions/${v.id}/content`, v.fileName);
-    } catch (e) {
-      message.error((e as Error).message);
-    }
-  };
+  const download = (v: Version) => run(() => apiDownload(`/api/attachments/${attachment.id}/versions/${v.id}/content`, v.fileName));
 
   return (
     <Table rowKey="id" size="small" pagination={false} loading={loading} dataSource={items}

@@ -1,10 +1,10 @@
+using CorrespondenceSystem.Contracts.Common;
 using System.Buffers;
 using System.Security.Cryptography;
 using CorrespondenceApi.Infrastructure.DataService;
 using CorrespondenceApi.Infrastructure.Storage;
 using CorrespondenceSystem.Contracts.Attachments;
 using FluentValidation;
-using ValidationFailure = FluentValidation.Results.ValidationFailure;
 
 namespace CorrespondenceApi.Features.Attachments;
 
@@ -19,12 +19,6 @@ public sealed class AttachmentContentService(
 {
     private const int BufferSize = 81920;
 
-    public static string NewStorageKey(int organizationId)
-    {
-        var now = DateTime.UtcNow;
-        return $"{organizationId}/{now:yyyy}/{now:MM}/{Guid.NewGuid():N}";
-    }
-
     /// <param name="content">
     /// Новий вміст. Копіюється в тимчасовий файл (а не в пам'ять) з одночасним підрахунком SHA-256
     /// і довжини; копіювання переривається, щойно розмір перевищить ліміт.
@@ -37,11 +31,11 @@ public sealed class AttachmentContentService(
             FileShare.None, BufferSize, FileOptions.Asynchronous | FileOptions.DeleteOnClose);
         var (length, sha256) = await CopyWithLimitAsync(content, buffer, storageOptions.MaxFileSizeBytes, ct);
         if (length == 0)
-            throw Invalid("Новий вміст вкладення порожній");
+            throw Errors.Validation("File", "Новий вміст вкладення порожній");
         buffer.Position = 0;
 
         var contentType = AttachmentFiles.ContentTypeFor(fileName);
-        var key = NewStorageKey(organizationId);
+        var key = AttachmentFiles.NewStorageKey(organizationId);
         await storage.PutAsync(key, buffer, length, contentType, ct);
 
         string oldKey;
@@ -76,7 +70,7 @@ public sealed class AttachmentContentService(
             {
                 total += read;
                 if (total > maxBytes)
-                    throw Invalid($"Розмір файлу перевищує {storageOptions.MaxFileSizeMb} МБ");
+                    throw Errors.Validation("File", $"Розмір файлу перевищує {storageOptions.MaxFileSizeMb} МБ");
                 hash.AppendData(chunk, 0, read);
                 await target.WriteAsync(chunk.AsMemory(0, read), ct);
             }
@@ -88,7 +82,4 @@ public sealed class AttachmentContentService(
             ArrayPool<byte>.Shared.Return(chunk);
         }
     }
-
-    private static ValidationException Invalid(string message) =>
-        new([new ValidationFailure("File", message)]);
 }

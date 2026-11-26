@@ -17,7 +17,7 @@ public static class SettingsEndpoints
             .RequireAuthorization(Permissions.SettingsManage);
 
         g.MapGet("/registration", async (ISender m, CancellationToken ct) =>
-            Results.Ok(await m.Send(new GetRegistrationSetting.Query(), ct)));
+            await m.Send(new GetRegistrationSetting.Query(), ct) is { } s ? Results.Ok(s) : Results.NoContent());
 
         g.MapPut("/registration", async (ISender m, RegistrationSettingInput i, CancellationToken ct) =>
         {

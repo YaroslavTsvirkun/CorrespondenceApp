@@ -1,0 +1,12 @@
+<Project>
+  <!-- Спільні налаштування всіх .NET-проєктів рішення (окремі .csproj задають лише своє) -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Попередження компілятора — помилки збірки; попередження аудиту NuGet (вразливі пакети)
+         лишаються попередженнями, щоб нова вразливість у пакеті не ламала збірку без змін у коді -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);NU1901;NU1902;NU1903;NU1904</WarningsNotAsErrors>
+  </PropertyGroup>
+</Project>

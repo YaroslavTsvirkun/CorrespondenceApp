@@ -3,17 +3,14 @@
   <!-- Сервіс даних: єдиний компонент із доступом до БД (MS SQL Server, Dapper).
        Обслуговує внутрішній Data API (POST /rpc/{операція}) для backend і розгортає SQL-код БД. -->
   <PropertyGroup>
-    <TargetFramework>net11.0</TargetFramework>
-    <Nullable>enable</Nullable>
-    <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>CorrespondenceSystem.DataService</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Dapper" Version="2.1.89" />
-    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="12.2.0" />
-    <PackageReference Include="MediatR" Version="12.5.0" />
-    <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.2" />
+    <PackageReference Include="Dapper" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" />
+    <PackageReference Include="MediatR" />
+    <PackageReference Include="Microsoft.Data.SqlClient" />
   </ItemGroup>
 
   <!-- SQL-код БД (схема, функції, процедури, тригери, початкові дані) копіюється

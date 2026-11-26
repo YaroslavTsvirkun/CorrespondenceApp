@@ -2,8 +2,6 @@ using CorrespondenceApi.Infrastructure.Conversion;
 using CorrespondenceApi.Infrastructure.Storage;
 using CorrespondenceSystem.Contracts.Attachments;
 using CorrespondenceSystem.Contracts.Common;
-using FluentValidation;
-using FluentValidation.Results;
 using MediatR;
 
 namespace CorrespondenceApi.Features.Attachments;
@@ -45,7 +43,7 @@ public static class PreviewAttachment
                 return await Open(file.StorageKey, "text/html", q.Id, ct);
 
             if (!Convertible.Contains(ext))
-                throw new ValidationException([new ValidationFailure("File", $"Перегляд файлів «{ext}» не підтримується")]);
+                throw Errors.Validation("File", $"Перегляд файлів «{ext}» не підтримується");
 
             var previewKey = PreviewKey(file.StorageKey);
             try

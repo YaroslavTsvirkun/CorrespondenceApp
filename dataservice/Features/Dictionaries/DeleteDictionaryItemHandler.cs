@@ -2,8 +2,6 @@ using CorrespondenceSystem.Contracts.Common;
 using CorrespondenceSystem.Contracts.Dictionaries;
 using CorrespondenceSystem.DataService.Common;
 using CorrespondenceSystem.DataService.Infrastructure.Database;
-using FluentValidation;
-using FluentValidation.Results;
 using MediatR;
 using Microsoft.Data.SqlClient;
 
@@ -22,8 +20,7 @@ public sealed class DeleteDictionaryItemHandler(Db db) : IRequestHandler<DeleteD
         }
         catch (SqlException ex) when (SqlErrors.IsReferenceViolation(ex))
         {
-            throw new ValidationException(
-                [new ValidationFailure("dictionary", "Запис використовується — видалення заборонено")]);
+            throw Errors.Validation("dictionary", "Запис використовується — видалення заборонено");
         }
     }
 }
