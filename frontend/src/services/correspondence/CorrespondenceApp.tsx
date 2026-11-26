@@ -2,7 +2,7 @@ import { Layout, Menu, Typography, Button, Tooltip } from 'antd';
 import {
   DashboardOutlined, FileTextOutlined, CheckSquareOutlined, ContactsOutlined,
   TeamOutlined, ApartmentOutlined, BookOutlined, BarChartOutlined, MailOutlined,
-  SafetyOutlined, BankOutlined, UsergroupAddOutlined, SettingOutlined, AppstoreOutlined,
+  SafetyOutlined, BankOutlined, UsergroupAddOutlined, SettingOutlined, ArrowLeftOutlined,
 } from '@ant-design/icons';
 import { Routes, Route, useNavigate, useLocation, Navigate } from 'react-router-dom';
 import Dashboard from '../../pages/Dashboard';
@@ -65,8 +65,10 @@ export default function CorrespondenceApp() {
       </Sider>
       <Layout>
         <Header style={{ background: '#fff', padding: '0 24px', display: 'flex', alignItems: 'center', borderBottom: '1px solid #f0f0f0' }}>
-          <Tooltip title="Усі сервіси">
-            <Button type="text" icon={<AppstoreOutlined />} onClick={() => navigate('/')} style={{ marginInlineEnd: 12 }} />
+          <Tooltip title="Повернутися до списку доступних сервісів">
+            <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')} style={{ marginInlineEnd: 16 }}>
+              Сервіси
+            </Button>
           </Tooltip>
           <Typography.Title level={4} style={{ margin: 0, flex: 1 }}>
             Інформаційна система відділу реєстрації кореспонденції
