@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
+  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, UserOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
@@ -29,8 +29,14 @@ export default function UsersPage() {
   const [editing, setEditing] = useState<UserDto | null>(null);
   const [form] = Form.useForm();
   const orgId = Form.useWatch('organizationId', form);
+  const [tab, setTab] = useState<'active' | 'inactive'>('active');
 
   const { rows, loading, save, remove } = useCrud<UserDto>('/api/users');
+  // Неактивні користувачі винесено на окрему вкладку, щоб не захаращувати основний список
+  const activeCount = useMemo(() => rows.filter((r) => r.isActive).length, [rows]);
+  const inactiveCount = rows.length - activeCount;
+  const visibleRows = useMemo(
+    () => rows.filter((r) => r.isActive === (tab === 'active')), [rows, tab]);
   const { data: opts } = useApiData(loadOptions, EMPTY_OPTIONS);
 
   const roleIdByName = useMemo(
@@ -82,10 +88,6 @@ export default function UsersPage() {
         rs.length ? rs.map((r) => <Tag key={r} color="blue">{r}</Tag>) : '—',
     },
     {
-      title: 'Активний', dataIndex: 'isActive', width: 100, align: 'center',
-      render: (v: boolean) => (v ? <Tag color="green">Так</Tag> : <Tag>Ні</Tag>),
-    },
-    {
       title: 'Дії', key: 'a', width: 110, fixed: 'right',
       render: (_, r) => (
         <Space>
@@ -109,10 +111,17 @@ export default function UsersPage() {
       </Typography.Paragraph>
       <Card>
         <div className="toolbar">
+          <Tabs activeKey={tab} onChange={(k) => setTab(k as 'active' | 'inactive')}
+            tabBarStyle={{ margin: 0 }}
+            items={[
+              { key: 'active', label: `Активні (${activeCount})` },
+              { key: 'inactive', label: `Неактивні (${inactiveCount})` },
+            ]} />
           <span className="spacer" />
           <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>Додати користувача</Button>
         </div>
-        <Table rowKey="id" columns={columns} dataSource={rows} loading={loading} size="middle" pagination={{ pageSize: 10 }} />
+        <Table rowKey="id" columns={columns} dataSource={visibleRows} loading={loading} size="middle" pagination={{ pageSize: 10 }}
+          locale={{ emptyText: tab === 'active' ? 'Немає активних користувачів' : 'Немає неактивних користувачів' }} />
       </Card>
 
       <Modal open={open} title={editing ? `Користувач: ${editing.userName}` : 'Новий користувач'}
