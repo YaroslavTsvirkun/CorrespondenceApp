@@ -11,7 +11,7 @@ const { Header, Content } = Layout;
 export default function ServicesPage() {
   const { user, canAny } = useAuth();
   const navigate = useNavigate();
-  const available = services.filter((s) => s.isAvailable(canAny));
+  const available = services.filter((s) => canAny(...s.permissions));
 
   return (
     <Layout style={{ minHeight: '100vh' }}>

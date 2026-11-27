@@ -59,7 +59,7 @@ export default function SettingsPage() {
         <Alert type="info" showIcon style={{ maxWidth: 720 }}
           message="Ваш обліковий запис не прив'язаний до організації"
           description={<>Патерн реєстраційного номера задається окремо для кожної організації —
-            у її картці в розділі <Link to="/correspondence/organizations">«Організації»</Link>.</>} />
+            у її картці в розділі <Link to="/admin/organizations">«Організації»</Link>.</>} />
       </>
     );
   }

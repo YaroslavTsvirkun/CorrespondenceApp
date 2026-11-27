@@ -46,7 +46,7 @@ export default function CorrespondentsPage() {
       render: (_: unknown, r: Dto) => (
         <Space>
           <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)} />
-          <Popconfirm title="Видалити кореспондента?" okText="Так" cancelText="Ні" onConfirm={() => remove(r.id)}>
+          <Popconfirm title="Видалити контрагента?" okText="Так" cancelText="Ні" onConfirm={() => remove(r.id)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
@@ -56,7 +56,7 @@ export default function CorrespondentsPage() {
 
   return (
     <>
-      <Typography.Title level={3}>Кореспонденти</Typography.Title>
+      <Typography.Title level={3}>Контрагенти</Typography.Title>
       <Card>
         <div className="toolbar">
           <Input allowClear prefix={<SearchOutlined />} placeholder="Пошук за назвою" style={{ width: 260 }}
@@ -68,11 +68,11 @@ export default function CorrespondentsPage() {
           scroll={{ x: 900 }} pagination={{ pageSize: 10 }} />
       </Card>
 
-      <Modal open={open} title={editing ? 'Редагування кореспондента' : 'Новий кореспондент'}
+      <Modal open={open} title={editing ? 'Редагування контрагента' : 'Новий контрагент'}
         onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" destroyOnHidden>
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="name" label="Назва або ПІБ" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="correspondentTypeId" label="Тип кореспондента" rules={[{ required: true }]}>
+          <Form.Item name="correspondentTypeId" label="Тип контрагента" rules={[{ required: true }]}>
             <Select options={opt(lookups.correspondentTypes)} />
           </Form.Item>
           <Form.Item name="address" label="Адреса"><Input /></Form.Item>
