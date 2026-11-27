@@ -10,4 +10,14 @@ public record DocumentInput(
     int? ReceiverDepartmentId, int? AuthorEmployeeId,
     string Title, string? Summary, DateOnly DocumentDate, string? IncomingNumber,
     bool IsControlled, string? Note,
-    string? RegistrationNumber, int RegistrationYear, int RegistrarEmployeeId);
+    string? RegistrationNumber, int RegistrationYear, int RegistrarEmployeeId)
+{
+    /// <summary>
+    /// Додаткові адресати й копії (головний кореспондент — <see cref="CorrespondentId"/>).
+    /// При редагуванні null — адресатів не змінювати, порожній список — прибрати всіх.
+    /// </summary>
+    public IReadOnlyList<DocumentPartyInput>? Addressees { get; init; }
+}
+
+/// <summary>Додатковий адресат документа. Role: 1 — адресат, 2 — копія.</summary>
+public record DocumentPartyInput(int PartyId, byte Role);

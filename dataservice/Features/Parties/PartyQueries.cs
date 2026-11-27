@@ -21,7 +21,8 @@ public sealed class GetPartiesHandler(Db db, ICurrentUser user) : IRequestHandle
             SELECT p.Id, p.Kind, p.FullName, p.ShortName, p.Code, lf.Code AS LegalForm,
                    p.ParentPartyId, COALESCE(pp.ShortName, pp.FullName) AS ParentName, p.IsActive,
                    addr.Address, phone.Value AS Phone, email.Value AS Email, cats.Categories,
-                   (SELECT COUNT(*) FROM dbo.Document d WHERE d.CorrespondentId = p.Id) AS DocumentCount,
+                   (SELECT COUNT(*) FROM dbo.Document d WHERE d.CorrespondentId = p.Id
+                       OR EXISTS (SELECT 1 FROM dbo.DocumentParty dp WHERE dp.DocumentId = d.Id AND dp.PartyId = p.Id)) AS DocumentCount,
                    (SELECT COUNT(*) FROM dbo.PartyBankAccount a WHERE a.PartyId = p.Id AND a.ClosedAt IS NULL) AS BankAccountCount
             FROM dbo.Party p
             LEFT JOIN dbo.LegalForm lf ON lf.Id = p.LegalFormId
@@ -55,7 +56,8 @@ public sealed class GetPartyHandler(Db db, ICurrentUser user) : IRequestHandler<
         await using var c = await db.OpenAsync(ct);
         using var grid = await c.QueryMultipleAsync(new CommandDefinition($"""
             SELECT p.Id, p.Kind, p.FullName, p.ShortName, p.Code, p.LegalFormId, p.ParentPartyId, p.IsActive, p.Note,
-                   (SELECT COUNT(*) FROM dbo.Document d WHERE d.CorrespondentId = p.Id) AS DocumentCount
+                   (SELECT COUNT(*) FROM dbo.Document d WHERE d.CorrespondentId = p.Id
+                       OR EXISTS (SELECT 1 FROM dbo.DocumentParty dp WHERE dp.DocumentId = d.Id AND dp.PartyId = p.Id)) AS DocumentCount
             FROM dbo.Party p WHERE p.Id = @Id AND {SqlScope.TenantFilter("p")};
             SELECT CategoryId FROM dbo.PartyCategoryLink WHERE PartyId = @Id;
             SELECT Kind, Country, PostalCode, Region, City, Line FROM dbo.PartyAddress WHERE PartyId = @Id ORDER BY Kind;

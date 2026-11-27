@@ -1,6 +1,4 @@
-using CorrespondenceSystem.Contracts.Common;
 using CorrespondenceSystem.Contracts.Documents;
-using CorrespondenceSystem.Contracts.Documents.Dtos;
 using CorrespondenceSystem.DataService.Common;
 using CorrespondenceSystem.DataService.Infrastructure.Database;
 using MediatR;
@@ -12,9 +10,10 @@ public sealed class UpdateDocumentHandler(Db db, ICurrentUser user) : IRequestHa
 {
     public async Task Handle(UpdateDocument.Command c, CancellationToken ct)
     {
-        var p = SqlScope.Tenant(user);
-        p.AddDynamicParams(c.Input);
+        var p = DocumentParams.From(c.Input, SqlScope.Tenant(user));
         p.Add("Id", c.Id);
+        // Адресати не передані — лишаються як були
+        p.Add("ReplaceAddressees", c.Input.Addressees is not null);
         await db.ExecuteProcAsync("dbo.usp_Document_Update", p, ct);
     }
 }

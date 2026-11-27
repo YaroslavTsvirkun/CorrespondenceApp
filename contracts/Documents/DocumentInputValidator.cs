@@ -17,5 +17,13 @@ public class DocumentInputValidator : AbstractValidator<DocumentInput>
         RuleFor(x => x.RegistrationYear).InclusiveBetween(1990, 2100);
         RuleFor(x => x.RegistrarEmployeeId).GreaterThan(0).WithMessage("Оберіть реєстратора");
         RuleFor(x => x.DocumentDate).NotEqual(default(DateOnly)).WithMessage("Вкажіть дату документа");
+        RuleForEach(x => x.Addressees).ChildRules(a =>
+            a.RuleFor(x => x.Role).InclusiveBetween((byte)1, (byte)2).WithMessage("Роль адресата: 1 — адресат, 2 — копія"));
+        RuleFor(x => x.Addressees)
+            .Must(list => list is null || list.Select(a => a.PartyId).Distinct().Count() == list.Count)
+            .WithMessage("Контрагента додано до адресатів документа двічі");
+        RuleFor(x => x.Addressees)
+            .Must((x, list) => list is null || x.CorrespondentId is null || list.All(a => a.PartyId != x.CorrespondentId))
+            .WithMessage("Головний кореспондент уже є в документі — не додавайте його ще й до адресатів");
     }
 }

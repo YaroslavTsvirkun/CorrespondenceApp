@@ -1,4 +1,5 @@
 using System.Data;
+using CorrespondenceSystem.Contracts.Documents.Dtos;
 using CorrespondenceSystem.Contracts.Parties.Dtos;
 using Dapper;
 namespace CorrespondenceSystem.DataService.Infrastructure.Database;
@@ -60,6 +61,18 @@ public static class SqlTvp
         foreach (var p in items)
             t.Rows.Add(++row, p.FullName.Trim(), Db(p.PositionName), Db(p.Phone), Db(p.Email), p.IsSignatory, Db(p.Note));
         return t.AsTableValuedParameter("dbo.PartyPersonList");
+    }
+
+    /// <summary>dbo.DocumentPartyList — додаткові адресати й копії документа (у порядку списку).</summary>
+    public static SqlMapper.ICustomQueryParameter DocumentParties(IEnumerable<DocumentPartyInput> items)
+    {
+        var t = new DataTable();
+        t.Columns.Add("RowNo", typeof(int));
+        t.Columns.Add("PartyId", typeof(int));
+        t.Columns.Add("Role", typeof(byte));
+        var row = 0;
+        foreach (var a in items) t.Rows.Add(++row, a.PartyId, a.Role);
+        return t.AsTableValuedParameter("dbo.DocumentPartyList");
     }
 
     /// <summary>Таблиця з колонкою RowNo (int) і текстовими колонками; типи інших колонок задає виклик.</summary>

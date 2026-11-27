@@ -18,7 +18,9 @@ BEGIN
         THROW 50404, @Message, 1;
     END;
 
-    DECLARE @Documents int = (SELECT COUNT(*) FROM dbo.Document WHERE CorrespondentId = @Id);
+    DECLARE @Documents int = (SELECT COUNT(*) FROM dbo.Document d
+                              WHERE d.CorrespondentId = @Id
+                                 OR EXISTS (SELECT 1 FROM dbo.DocumentParty dp WHERE dp.DocumentId = d.Id AND dp.PartyId = @Id));
     IF @Documents > 0
     BEGIN
         SET @Message = CONCAT(N'Контрагент є в документах (', @Documents,

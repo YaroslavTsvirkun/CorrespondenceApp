@@ -20,7 +20,8 @@ public sealed class GetDocumentsHandler(Db db, ICurrentUser user) : IRequestHand
         {
             p.Add("Search", "%" + SqlText.EscapeLike(q.Search.Trim()) + "%");
             where.Add($"(d.Title LIKE @Search ESCAPE '{SqlText.LikeEscape}' " +
-                      $"OR d.RegistrationNumber LIKE @Search ESCAPE '{SqlText.LikeEscape}')");
+                      $"OR d.RegistrationNumber LIKE @Search ESCAPE '{SqlText.LikeEscape}' " +
+                      $"OR d.Correspondent LIKE @Search ESCAPE '{SqlText.LikeEscape}')");
         }
         if (q.DirectionId is int dir) { p.Add("DirectionId", dir); where.Add("d.DirectionId = @DirectionId"); }
         if (q.DocumentTypeId is int dt) { p.Add("DocumentTypeId", dt); where.Add("d.DocumentTypeId = @DocumentTypeId"); }

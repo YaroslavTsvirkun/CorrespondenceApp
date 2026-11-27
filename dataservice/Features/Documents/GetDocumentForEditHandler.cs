@@ -7,7 +7,7 @@ using MediatR;
 
 namespace CorrespondenceSystem.DataService.Features.Documents;
 
-/// <summary>Дані слайсу: сирі поля документа для форми редагування.</summary>
+/// <summary>Дані слайсу: сирі поля документа (з додатковими адресатами) для форми редагування.</summary>
 public sealed class GetDocumentForEditHandler(Db db, ICurrentUser user) : IRequestHandler<GetDocumentForEdit.Query, DocumentInput>
 {
     public async Task<DocumentInput> Handle(GetDocumentForEdit.Query q, CancellationToken ct)
@@ -27,6 +27,10 @@ public sealed class GetDocumentForEditHandler(Db db, ICurrentUser user) : IReque
             FROM dbo.vw_Document d
             WHERE d.Id = @Id AND {SqlScope.DocumentFilter("d")}
             """, p, ct);
-        return d ?? throw new NotFoundException($"Документ #{q.Id} не знайдено");
+        if (d is null) throw new NotFoundException($"Документ #{q.Id} не знайдено");
+
+        var addressees = await db.QueryAsync<DocumentPartyInput>(
+            "SELECT PartyId, Role FROM dbo.DocumentParty WHERE DocumentId = @Id ORDER BY SortOrder", new { q.Id }, ct);
+        return d with { Addressees = addressees };
     }
 }

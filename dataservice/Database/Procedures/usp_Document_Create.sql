@@ -1,6 +1,8 @@
 /* Процедура: реєстрація нового документа разом із реєстраційним записом.
    - @OrganizationId = NULL (супер-адмін) — організація береться від реєстратора;
-   - @RegistrationNumber порожній — номер генерується за патерном організації.
+   - @RegistrationNumber порожній — номер генерується за патерном організації;
+   - назва кореспондента фіксується знімком (CorrespondentName); @Addressees — додаткові
+     адресати й копії (dbo.DocumentPartyList) зі знімками назв.
    Генерація номера серіалізується блокуванням sp_getapplock на організацію,
    тож паралельні реєстрації не отримають однаковий номер.
    Повертає: Id нового документа. */
@@ -22,7 +24,8 @@ CREATE OR ALTER PROCEDURE dbo.usp_Document_Create
     @Note                 nvarchar(max),
     @RegistrationNumber   nvarchar(30),
     @RegistrationYear     int,
-    @RegistrarEmployeeId  int
+    @RegistrarEmployeeId  int,
+    @Addressees           dbo.DocumentPartyList READONLY
 AS
 BEGIN
     SET NOCOUNT ON;
@@ -47,6 +50,15 @@ BEGIN
                WHERE x.Id IS NOT NULL
                  AND NOT EXISTS (SELECT 1 FROM dbo.Employee e WHERE e.Id = x.Id AND e.OrganizationId = @OrganizationId))
         THROW 50400, N'Автор або реєстратор не належить організації документа', 1;
+
+    -- Додаткові адресати й копії — контрагенти організації документа, без повторів і без головного кореспондента
+    IF EXISTS (SELECT 1 FROM @Addressees a
+               WHERE a.Role NOT IN (1, 2)
+                  OR a.PartyId = @CorrespondentId
+                  OR NOT EXISTS (SELECT 1 FROM dbo.Party p WHERE p.Id = a.PartyId AND p.OrganizationId = @OrganizationId))
+        THROW 50400, N'Адресати документа мають бути контрагентами його організації (без головного кореспондента)', 1;
+    IF EXISTS (SELECT PartyId FROM @Addressees GROUP BY PartyId HAVING COUNT(*) > 1)
+        THROW 50400, N'Контрагента додано до адресатів документа двічі', 1;
 
     DECLARE @Id int, @Sequence int, @Message nvarchar(400);
     DECLARE @LockName nvarchar(255) = CONCAT(N'registration-number:', @OrganizationId);
@@ -76,15 +88,20 @@ BEGIN
         EXEC sp_set_session_context @key = N'EmployeeId', @value = @RegistrarEmployeeId;
 
     INSERT dbo.Document
-        (OrganizationId, DirectionId, DocumentTypeId, CurrentStatusId, DeliveryChannelId, CorrespondentId,
+        (OrganizationId, DirectionId, DocumentTypeId, CurrentStatusId, DeliveryChannelId, CorrespondentId, CorrespondentName,
          SenderDepartmentId, ReceiverDepartmentId, AuthorEmployeeId, Title, Summary, DocumentDate,
          IncomingNumber, IsControlled, Note)
     VALUES
         (@OrganizationId, @DirectionId, @DocumentTypeId, @CurrentStatusId, @DeliveryChannelId, @CorrespondentId,
+         (SELECT COALESCE(ShortName, FullName) FROM dbo.Party WHERE Id = @CorrespondentId),
          @SenderDepartmentId, @ReceiverDepartmentId, @AuthorEmployeeId, @Title, @Summary, @DocumentDate,
          @IncomingNumber, @IsControlled, @Note);
 
     SET @Id = CAST(SCOPE_IDENTITY() AS int);
+
+    INSERT dbo.DocumentParty (DocumentId, PartyId, Role, PartyName, SortOrder)
+    SELECT @Id, a.PartyId, a.Role, COALESCE(p.ShortName, p.FullName), a.RowNo
+    FROM @Addressees a JOIN dbo.Party p ON p.Id = a.PartyId;
 
     INSERT dbo.RegistrationRecord
         (DocumentId, RegistrarEmployeeId, RegistrationNumber, RegistrationYear, OrganizationId, SequenceNumber, RegisteredAt)

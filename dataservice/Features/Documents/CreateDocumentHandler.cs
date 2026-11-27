@@ -1,9 +1,7 @@
 using CorrespondenceSystem.Contracts.Common;
 using CorrespondenceSystem.Contracts.Documents;
-using CorrespondenceSystem.Contracts.Documents.Dtos;
 using CorrespondenceSystem.DataService.Common;
 using CorrespondenceSystem.DataService.Infrastructure.Database;
-using Dapper;
 using MediatR;
 
 namespace CorrespondenceSystem.DataService.Features.Documents;
@@ -15,7 +13,7 @@ public sealed class CreateDocumentHandler(Db db, ICurrentUser user) : IRequestHa
     {
         // Організація документа = організація поточного користувача
         // (для супер-адміна процедура візьме її від реєстратора).
-        var p = new DynamicParameters(c.Input);
+        var p = DocumentParams.From(c.Input);
         p.Add("OrganizationId", user.OrganizationId);
         return await db.ScalarProcAsync<int>("dbo.usp_Document_Create", p, ct);
     }

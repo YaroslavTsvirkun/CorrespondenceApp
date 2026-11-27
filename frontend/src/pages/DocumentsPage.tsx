@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import {
   Button, Card, DatePicker, Descriptions, Drawer, Form, Input, InputNumber,
-  Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
+  Modal, Popconfirm, Select, Space, Switch, Table, Tag, Tooltip, Typography,
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, EyeOutlined, SearchOutlined, ClearOutlined,
@@ -17,6 +17,7 @@ import { P } from '../auth/permissions';
 import AttachmentsPanel from '../components/AttachmentsPanel';
 import { statusColor } from '../data/statusColors';
 import { useApiAction, useApiData } from '../hooks/useApi';
+import QuickPartyModal from '../services/parties/QuickPartyModal';
 
 interface ListItem {
   id: number; registrationNumber: string; registrationYear: number; direction: string;
@@ -29,6 +30,9 @@ interface DocDetail {
   direction: string; documentType: string; status: string; isControlled: boolean;
   channel?: string; correspondent?: string; senderDepartment?: string; receiverDepartment?: string;
   author?: string; title: string; summary?: string; documentDate: string; incomingNumber?: string; note?: string;
+  /** Поточна назва контрагента, якщо його перейменували після реєстрації (correspondent — назва на той момент) */
+  correspondentCurrentName?: string;
+  addressees: { partyId: number; role: number; name: string; currentName?: string }[];
   tasks: { id: number; executor: string; taskText: string; dueDate: string; status: string; completedAt?: string }[];
 }
 interface Paged { items: ListItem[]; total: number; page: number; pageSize: number; }
@@ -38,6 +42,8 @@ interface DocInput {
   receiverDepartmentId?: number; authorEmployeeId?: number; title: string; summary?: string;
   documentDate: string; incomingNumber?: string; isControlled: boolean; note?: string;
   registrationNumber: string; registrationYear: number; registrarEmployeeId: number;
+  /** Додаткові адресати (role 1) і копії (role 2); головний кореспондент — correspondentId */
+  addressees?: { partyId: number; role: number }[];
 }
 
 const { RangePicker } = DatePicker;
@@ -45,8 +51,9 @@ const PAGE_SIZE = 8;
 
 export default function DocumentsPage() {
   const run = useApiAction();
-  const { lookups } = useLookups();
+  const { lookups, reload: reloadLookups } = useLookups();
   const { can } = useAuth();
+  const [quickParty, setQuickParty] = useState(false);
 
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -90,12 +97,20 @@ export default function DocumentsPage() {
   const openEdit = (row: ListItem) => run(async () => {
     const input = await api<DocInput>(`/api/documents/${row.id}/edit`);
     setEditingId(row.id);
-    form.setFieldsValue({ ...input, documentDate: dayjs(input.documentDate) });
+    const ids = (role: number) => (input.addressees ?? []).filter((a) => a.role === role).map((a) => a.partyId);
+    form.setFieldsValue({ ...input, documentDate: dayjs(input.documentDate), addresseeIds: ids(1), copyIds: ids(2) });
     setOpen(true);
   });
   const submit = async () => {
-    const v = await form.validateFields();
-    const body = JSON.stringify({ ...v, documentDate: (v.documentDate as dayjs.Dayjs).format('YYYY-MM-DD') });
+    const { addresseeIds = [], copyIds = [], ...v } = await form.validateFields();
+    const body = JSON.stringify({
+      ...v,
+      documentDate: (v.documentDate as dayjs.Dayjs).format('YYYY-MM-DD'),
+      addressees: [
+        ...(addresseeIds as number[]).map((partyId) => ({ partyId, role: 1 })),
+        ...(copyIds as number[]).map((partyId) => ({ partyId, role: 2 })),
+      ],
+    });
     const saved = await run(
       () => editingId
         ? api(`/api/documents/${editingId}`, { method: 'PUT', body })
@@ -166,7 +181,7 @@ export default function DocumentsPage() {
       <Typography.Title level={3}>Документи</Typography.Title>
       <Card>
         <div className="toolbar">
-          <Input allowClear prefix={<SearchOutlined />} placeholder="Пошук за № або темою" style={{ width: 230 }}
+          <Input allowClear prefix={<SearchOutlined />} placeholder="Пошук за №, темою, кореспондентом" style={{ width: 270 }}
             value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
           <Select allowClear placeholder="Напрям" style={{ width: 140 }} options={opt(lookups.directions)}
             value={fDirection} onChange={(v) => { setFDirection(v); setPage(1); }} />
@@ -227,9 +242,8 @@ export default function DocumentsPage() {
             <Form.Item name="deliveryChannelId" label="Канал">
               <Select allowClear style={{ width: 180 }} options={opt(lookups.channels)} /></Form.Item>
           </Space>
+          <PartyFields onQuickAdd={can(P.parties) ? () => setQuickParty(true) : undefined} />
           <Space align="start" wrap>
-            <Form.Item name="correspondentId" label="Кореспондент">
-              <Select allowClear showSearch optionFilterProp="label" style={{ width: 260 }} options={opt(lookups.correspondents)} /></Form.Item>
             <Form.Item name="senderDepartmentId" label="Підрозділ-відправник">
               <Select allowClear style={{ width: 200 }} options={opt(lookups.departments)} /></Form.Item>
             <Form.Item name="receiverDepartmentId" label="Підрозділ-одержувач">
@@ -243,6 +257,11 @@ export default function DocumentsPage() {
           </Space>
         </Form>
       </Modal>
+
+      {quickParty && (
+        <QuickPartyModal onClose={() => setQuickParty(false)}
+          onCreated={(id) => { reloadLookups(); form.setFieldValue('correspondentId', id); }} />
+      )}
 
       <Drawer open={!!viewing} size="large" onClose={() => setViewing(null)}
         title={viewing ? `Картка документа № ${viewing.registrationNumber}` : ''}>
@@ -264,7 +283,23 @@ function DocCard({ d }: { d: DocDetail }) {
         <Descriptions.Item label="На контролі">{d.isControlled ? 'Так' : 'Ні'}</Descriptions.Item>
         <Descriptions.Item label="Дата документа">{dayjs(d.documentDate).format('DD.MM.YYYY')}</Descriptions.Item>
         <Descriptions.Item label="Канал">{d.channel || '—'}</Descriptions.Item>
-        <Descriptions.Item label="Кореспондент">{d.correspondent || '—'}</Descriptions.Item>
+        <Descriptions.Item label="Кореспондент">
+          {d.correspondent || '—'}
+          {d.correspondentCurrentName && (
+            <Typography.Text type="secondary"> (зараз: {d.correspondentCurrentName})</Typography.Text>
+          )}
+        </Descriptions.Item>
+        {d.addressees.length > 0 && (
+          <Descriptions.Item label="Адресати й копії">
+            {d.addressees.map((a) => (
+              <div key={a.partyId}>
+                <Tag color={a.role === 1 ? 'blue' : 'default'}>{a.role === 1 ? 'Адресат' : 'Копія'}</Tag>
+                {a.name}
+                {a.currentName && <Typography.Text type="secondary"> (зараз: {a.currentName})</Typography.Text>}
+              </div>
+            ))}
+          </Descriptions.Item>
+        )}
         <Descriptions.Item label="Підрозділ-відправник">{d.senderDepartment || '—'}</Descriptions.Item>
         <Descriptions.Item label="Підрозділ-одержувач">{d.receiverDepartment || '—'}</Descriptions.Item>
         <Descriptions.Item label="Автор">{d.author || '—'}</Descriptions.Item>
@@ -280,6 +315,55 @@ function DocCard({ d }: { d: DocDetail }) {
           { title: 'Строк', dataIndex: 'dueDate', width: 110, render: (v) => dayjs(v).format('DD.MM.YYYY') },
           { title: 'Статус', dataIndex: 'status', width: 120 },
         ]} />
+    </>
+  );
+}
+
+/**
+ * Кореспондент документа (відправник вхідного або основний адресат вихідного), додаткові адресати й копії.
+ * Головного кореспондента й уже вибраних не пропонуємо вдруге.
+ */
+function PartyFields({ onQuickAdd }: { onQuickAdd?: () => void }) {
+  const { lookups } = useLookups();
+  const form = Form.useFormInstance();
+  const directionId = Form.useWatch('directionId', form) as number | undefined;
+  const correspondentId = Form.useWatch('correspondentId', form) as number | undefined;
+  const addresseeIds = (Form.useWatch('addresseeIds', form) as number[] | undefined) ?? [];
+  const copyIds = (Form.useWatch('copyIds', form) as number[] | undefined) ?? [];
+  const code = lookups.directions.find((d) => d.id === directionId)?.code;
+  const showAddressees = code === 'OUT' || addresseeIds.length > 0 || copyIds.length > 0;
+
+  const options = (exclude: number[]) =>
+    opt(lookups.correspondents).filter((o) => !exclude.includes(o.value));
+  const label = code === 'IN' ? 'Кореспондент (відправник)' : code === 'OUT' ? 'Кореспондент (основний адресат)' : 'Кореспондент';
+
+  return (
+    <>
+      <Form.Item label={label} style={{ marginBottom: 0 }}>
+        <Space.Compact style={{ width: 520, marginBottom: 24 }}>
+          <Form.Item name="correspondentId" noStyle>
+            <Select allowClear showSearch optionFilterProp="label" style={{ width: '100%' }} placeholder="Контрагент з реєстру"
+              options={options([...addresseeIds, ...copyIds])} />
+          </Form.Item>
+          {onQuickAdd && (
+            <Tooltip title="Додати нового контрагента до реєстру">
+              <Button icon={<PlusOutlined />} onClick={onQuickAdd} />
+            </Tooltip>
+          )}
+        </Space.Compact>
+      </Form.Item>
+      {showAddressees && (
+        <Space align="start" wrap>
+          <Form.Item name="addresseeIds" label="Інші адресати">
+            <Select mode="multiple" allowClear showSearch optionFilterProp="label" style={{ width: 340 }}
+              options={options([correspondentId ?? 0, ...copyIds])} />
+          </Form.Item>
+          <Form.Item name="copyIds" label="Копії">
+            <Select mode="multiple" allowClear showSearch optionFilterProp="label" style={{ width: 340 }}
+              options={options([correspondentId ?? 0, ...addresseeIds])} />
+          </Form.Item>
+        </Space>
+      )}
     </>
   );
 }

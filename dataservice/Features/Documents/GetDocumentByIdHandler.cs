@@ -8,7 +8,7 @@ using MediatR;
 
 namespace CorrespondenceSystem.DataService.Features.Documents;
 
-/// <summary>Дані слайсу: картка документа (vw_Document + доручення з vw_Task).</summary>
+/// <summary>Дані слайсу: картка документа (vw_Document, доручення з vw_Task, додаткові адресати).</summary>
 public sealed class GetDocumentByIdHandler(Db db, ICurrentUser user) : IRequestHandler<GetDocumentById.Query, DocumentDetail>
 {
     // Рядок картки без доручень — Dapper мапить його за конструктором
@@ -17,7 +17,7 @@ public sealed class GetDocumentByIdHandler(Db db, ICurrentUser user) : IRequestH
         string Registrar, string Direction, string DocumentType, string Status, bool IsControlled,
         string? Channel, string? Correspondent, string? SenderDepartment, string? ReceiverDepartment,
         string? Author, string Title, string? Summary, DateOnly DocumentDate, string? IncomingNumber,
-        string? Note);
+        string? Note, string? CorrespondentCurrent);
 
     public async Task<DocumentDetail> Handle(GetDocumentById.Query q, CancellationToken ct)
     {
@@ -32,7 +32,7 @@ public sealed class GetDocumentByIdHandler(Db db, ICurrentUser user) : IRequestH
                    ISNULL(d.Registrar, N'') AS Registrar,
                    d.Direction, d.DocumentType, d.Status, d.IsControlled,
                    d.Channel, d.Correspondent, d.SenderDepartment, d.ReceiverDepartment, d.Author,
-                   d.Title, d.Summary, d.DocumentDate, d.IncomingNumber, d.Note
+                   d.Title, d.Summary, d.DocumentDate, d.IncomingNumber, d.Note, d.CorrespondentCurrent
             FROM dbo.vw_Document d
             WHERE d.Id = @Id AND {SqlScope.DocumentFilter("d")};
 
@@ -40,6 +40,13 @@ public sealed class GetDocumentByIdHandler(Db db, ICurrentUser user) : IRequestH
             FROM dbo.vw_Task t
             WHERE t.DocumentId = @Id
             ORDER BY t.Id;
+
+            SELECT dp.PartyId, dp.Role, dp.PartyName AS Name,
+                   NULLIF(COALESCE(p.ShortName, p.FullName), dp.PartyName) AS CurrentName
+            FROM dbo.DocumentParty dp
+            JOIN dbo.Party p ON p.Id = dp.PartyId
+            WHERE dp.DocumentId = @Id
+            ORDER BY dp.Role, dp.SortOrder;
             """;
 
         await using var conn = await db.OpenAsync(ct);
@@ -47,10 +54,16 @@ public sealed class GetDocumentByIdHandler(Db db, ICurrentUser user) : IRequestH
         var d = await grid.ReadSingleOrDefaultAsync<DetailRow>()
             ?? throw new NotFoundException($"Документ #{q.Id} не знайдено");
         var tasks = (await grid.ReadAsync<DocumentTaskItem>()).AsList();
+        var addressees = (await grid.ReadAsync<DocumentPartyItem>()).AsList();
 
         return new DocumentDetail(d.Id, d.RegistrationNumber, d.RegistrationYear, d.RegisteredAt, d.Registrar,
             d.Direction, d.DocumentType, d.Status, d.IsControlled, d.Channel, d.Correspondent,
             d.SenderDepartment, d.ReceiverDepartment, d.Author, d.Title, d.Summary, d.DocumentDate,
-            d.IncomingNumber, d.Note, tasks);
+            d.IncomingNumber, d.Note, tasks)
+        {
+            // Поточна назва — лише якщо контрагента перейменували після реєстрації
+            CorrespondentCurrentName = d.CorrespondentCurrent != d.Correspondent ? d.CorrespondentCurrent : null,
+            Addressees = addressees,
+        };
     }
 }
