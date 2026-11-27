@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Typography,
 } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { api } from '../api/client';
+import { DEPT_SHORT_NAME_MAX, generateDeptShortName } from '../data/deptShortName';
 import { useAuth } from '../auth/AuthContext';
 import { P } from '../auth/permissions';
 import { useApiData } from '../hooks/useApi';
@@ -63,8 +64,28 @@ export default function DepartmentsPage() {
       .map((r) => ({ value: r.id, label: r.name }));
   }, [rows, editing, isSuper, formOrgId]);
 
+  // Скорочена назва генерується з повної: для нового підрозділу — автоматично, поки її не змінили
+  // вручну; будь-коли — кнопкою «Згенерувати». Унікальність — серед підрозділів тієї ж організації.
+  const shortNameTouched = useRef(false);
+  const makeShortName = (name: string | undefined) => {
+    const orgId = isSuper ? form.getFieldValue('organizationId') : rows[0]?.organizationId;
+    const taken = rows
+      .filter((r) => r.id !== editing?.id && (orgId == null || r.organizationId === orgId))
+      .map((r) => r.shortName);
+    return generateDeptShortName(name ?? '', taken);
+  };
+  const onValuesChange = (changed: Partial<Dto>) => {
+    if ('shortName' in changed) shortNameTouched.current = !!changed.shortName;
+    else if ('name' in changed && !editing && !shortNameTouched.current)
+      form.setFieldValue('shortName', makeShortName(changed.name));
+  };
+  const regenerateShortName = () => {
+    form.setFieldValue('shortName', makeShortName(form.getFieldValue('name')));
+    shortNameTouched.current = false;
+  };
+
   const openAdd = (parentId?: number, orgId?: number) => {
-    setEditing(null); form.resetFields();
+    setEditing(null); form.resetFields(); shortNameTouched.current = false;
     form.setFieldsValue({ isActive: true, parentDepartmentId: parentId ?? null, organizationId: orgId ?? null });
     setOpen(true);
   };
@@ -127,7 +148,7 @@ export default function DepartmentsPage() {
 
       <Modal open={open} title={editing ? 'Редагування підрозділу' : 'Новий підрозділ'}
         onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" destroyOnHidden>
-        <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
+        <Form form={form} layout="vertical" style={{ marginTop: 12 }} onValuesChange={onValuesChange}>
           {isSuper && (
             <Form.Item name="organizationId" label="Організація"
               rules={[{ required: true, message: 'Оберіть організацію' }]}>
@@ -137,7 +158,15 @@ export default function DepartmentsPage() {
             </Form.Item>
           )}
           <Form.Item name="name" label="Назва" rules={[{ required: true }]}><Input /></Form.Item>
-          <Form.Item name="shortName" label="Скорочена назва"><Input /></Form.Item>
+          <Form.Item label="Скорочена назва"
+            tooltip="Генерується з назви: абревіатура (ВК, ГОУ (J-3)) або усічення одного слова (Канц.)">
+            <Space.Compact style={{ width: '100%' }}>
+              <Form.Item name="shortName" noStyle><Input maxLength={DEPT_SHORT_NAME_MAX} /></Form.Item>
+              <Button icon={<SyncOutlined />} onClick={regenerateShortName} title="Згенерувати скорочену назву з повної">
+                Згенерувати
+              </Button>
+            </Space.Compact>
+          </Form.Item>
           <Form.Item name="parentDepartmentId" label="Підпорядкований підрозділу">
             <Select allowClear showSearch optionFilterProp="label"
               placeholder="— кореневий —" options={parentOptions} />
