@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography,
 } from 'antd';
-import { PlusOutlined, EditOutlined, DeleteOutlined, ApartmentOutlined } from '@ant-design/icons';
+import { PlusOutlined, EditOutlined, DeleteOutlined, ApartmentOutlined, SyncOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import { ORG_CODE_MAX, generateOrgCode } from '../data/orgCode';
 import { useCrud } from '../hooks/useCrud';
 import { useExpandAll } from '../hooks/useExpandAll';
 
@@ -48,8 +49,23 @@ export default function OrganizationsPage() {
     [rows, editing],
   );
 
+  // Код генерується з назви: для нової організації — автоматично, поки його не змінили вручну;
+  // будь-коли — кнопкою «Згенерувати». Унікальність — серед інших організацій.
+  const codeTouched = useRef(false);
+  const makeCode = (name: string | undefined) =>
+    generateOrgCode(name ?? '', rows.filter((r) => r.id !== editing?.id).map((r) => r.code));
+  const onValuesChange = (changed: Partial<Dto>) => {
+    if ('code' in changed) codeTouched.current = !!changed.code;
+    else if ('name' in changed && !editing && !codeTouched.current)
+      form.setFieldValue('code', makeCode(changed.name));
+  };
+  const regenerateCode = () => {
+    form.setFieldValue('code', makeCode(form.getFieldValue('name')));
+    codeTouched.current = false;
+  };
+
   const openAdd = (parentId?: number) => {
-    setEditing(null); form.resetFields();
+    setEditing(null); form.resetFields(); codeTouched.current = false;
     form.setFieldsValue({ isActive: true, parentOrganizationId: parentId ?? null });
     setOpen(true);
   };
@@ -111,11 +127,19 @@ export default function OrganizationsPage() {
 
       <Modal open={open} title={editing ? `Організація: ${editing.name}` : 'Нова організація'}
         onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" destroyOnHidden>
-        <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
+        <Form form={form} layout="vertical" style={{ marginTop: 12 }} onValuesChange={onValuesChange}>
           <Form.Item name="name" label="Назва" rules={[{ required: true, message: 'Вкажіть назву' }]}>
             <Input />
           </Form.Item>
-          <Form.Item name="code" label="Код (скорочення)"><Input maxLength={30} /></Form.Item>
+          <Form.Item label="Код (скорочення)"
+            tooltip="Генерується з назви: назва в лапках транслітерується (PROMIN), інакше — абревіатура (MOU)">
+            <Space.Compact style={{ width: '100%' }}>
+              <Form.Item name="code" noStyle><Input maxLength={ORG_CODE_MAX} /></Form.Item>
+              <Button icon={<SyncOutlined />} onClick={regenerateCode} title="Згенерувати код з назви">
+                Згенерувати
+              </Button>
+            </Space.Compact>
+          </Form.Item>
           <Form.Item name="parentOrganizationId" label="Материнська організація">
             <Select allowClear placeholder="— коренева —" options={parentOptions} />
           </Form.Item>
