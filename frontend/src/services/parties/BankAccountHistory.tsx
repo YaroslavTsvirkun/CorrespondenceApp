@@ -79,7 +79,7 @@ export default function BankAccountHistory({ partyId, onClose }: { partyId: numb
           : (
             <Timeline style={{ marginTop: 16 }} items={data.map((h) => ({
               color: ACTIONS[h.action]?.color,
-              children: (
+              content: (
                 <>
                   <Tag color={ACTIONS[h.action]?.color}>{ACTIONS[h.action]?.label}</Tag>
                   <Typography.Text type="secondary">

@@ -35,6 +35,7 @@ export default function AccessPage() {
   const openAdd = () => { setEditing(null); setSelected([]); form.resetFields(); setOpen(true); };
   const openEdit = (r: RoleDto) => {
     setEditing(r); setSelected(r.permissions);
+    form.resetFields();
     form.setFieldsValue({ name: r.name, description: r.description });
     setOpen(true);
   };
@@ -84,7 +85,7 @@ export default function AccessPage() {
       </Card>
 
       <Drawer
-        open={open} size="large" onClose={() => setOpen(false)}
+        open={open} size="large" onClose={() => setOpen(false)} forceRender
         title={editing ? `Роль: ${editing.name}` : 'Нова роль'}
         extra={<Button type="primary" onClick={save}>Зберегти</Button>}
       >

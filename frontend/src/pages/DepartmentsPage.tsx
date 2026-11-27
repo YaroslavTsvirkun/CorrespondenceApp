@@ -91,6 +91,7 @@ export default function DepartmentsPage() {
   };
   const openEdit = (d: Dto) => {
     setEditing(d);
+    form.resetFields();
     form.setFieldsValue({
       name: d.name, shortName: d.shortName, description: d.description, isActive: d.isActive,
       parentDepartmentId: d.parentDepartmentId ?? null, organizationId: d.organizationId,
@@ -147,7 +148,7 @@ export default function DepartmentsPage() {
       </Card>
 
       <Modal open={open} title={editing ? 'Редагування підрозділу' : 'Новий підрозділ'}
-        onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" destroyOnHidden>
+        onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" forceRender>
         <Form form={form} layout="vertical" style={{ marginTop: 12 }} onValuesChange={onValuesChange}>
           {isSuper && (
             <Form.Item name="organizationId" label="Організація"

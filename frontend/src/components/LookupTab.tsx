@@ -30,7 +30,7 @@ export default function LookupTab({ kind, permission, code }: Props) {
   const { rows, loading, save, remove } = useCrud<Item>(`/api/dictionaries/${kind}`, reload);
 
   const openAdd = () => { setEditing(null); form.resetFields(); setOpen(true); };
-  const openEdit = (x: Item) => { setEditing(x); form.setFieldsValue(x); setOpen(true); };
+  const openEdit = (x: Item) => { setEditing(x); form.resetFields(); form.setFieldsValue(x); setOpen(true); };
   const submit = async () => {
     const v = await form.validateFields();
     if (await save(editing?.id, v)) setOpen(false);
@@ -63,7 +63,7 @@ export default function LookupTab({ kind, permission, code }: Props) {
       )}
       <Table rowKey="id" columns={columns} dataSource={rows} size="small" loading={loading} pagination={false} />
       <Modal open={open} title={editing ? 'Редагування' : 'Новий запис'} onCancel={() => setOpen(false)}
-        onOk={submit} okText="Зберегти" cancelText="Скасувати" destroyOnHidden>
+        onOk={submit} okText="Зберегти" cancelText="Скасувати" forceRender>
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="name" label="Назва" rules={[{ required: true }]}><Input /></Form.Item>
           {code && (

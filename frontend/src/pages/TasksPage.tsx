@@ -55,6 +55,7 @@ export default function TasksPage() {
   };
   const openEdit = (t: Dto) => {
     setEditing(t);
+    form.resetFields();
     form.setFieldsValue({ ...t, dueDate: dayjs(t.dueDate), completedAt: t.completedAt ? dayjs(t.completedAt) : undefined });
     setOpen(true);
   };
@@ -104,7 +105,7 @@ export default function TasksPage() {
       </Card>
 
       <Modal open={open} title={editing ? 'Редагування доручення' : 'Нове доручення'}
-        onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" width={680} destroyOnHidden>
+        onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" width={680} forceRender>
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="documentId" label="Документ" rules={[{ required: true }]}>
             <Select showSearch optionFilterProp="label" options={docs} disabled={!!editing} />

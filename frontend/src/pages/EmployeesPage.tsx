@@ -40,7 +40,7 @@ export default function EmployeesPage() {
     () => buildDepartmentTree(departments, editing?.departmentId), [departments, editing]);
 
   const openAdd = () => { setEditing(null); form.resetFields(); form.setFieldsValue({ isActive: true }); setOpen(true); };
-  const openEdit = (e: Dto) => { setEditing(e); form.setFieldsValue(e); setOpen(true); };
+  const openEdit = (e: Dto) => { setEditing(e); form.resetFields(); form.setFieldsValue(e); setOpen(true); };
   const submit = async () => {
     const v = await form.validateFields();
     if (await save(editing?.id, v)) setOpen(false);
@@ -85,7 +85,7 @@ export default function EmployeesPage() {
       </Card>
 
       <Modal open={open} title={editing ? 'Редагування працівника' : 'Новий працівник'}
-        onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" destroyOnHidden>
+        onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" forceRender>
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="fullName" label="ПІБ" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="positionName" label="Посада" rules={[{ required: true }]}><Input /></Form.Item>

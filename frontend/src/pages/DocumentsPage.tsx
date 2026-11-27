@@ -97,6 +97,7 @@ export default function DocumentsPage() {
   const openEdit = (row: ListItem) => run(async () => {
     const input = await api<DocInput>(`/api/documents/${row.id}/edit`);
     setEditingId(row.id);
+    form.resetFields();
     const ids = (role: number) => (input.addressees ?? []).filter((a) => a.role === role).map((a) => a.partyId);
     form.setFieldsValue({ ...input, documentDate: dayjs(input.documentDate), addresseeIds: ids(1), copyIds: ids(2) });
     setOpen(true);
@@ -207,7 +208,7 @@ export default function DocumentsPage() {
 
       <Modal open={open} title={editingId ? 'Редагування документа' : 'Новий документ'}
         onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати"
-        width={760} destroyOnHidden>
+        width={760} forceRender>
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}
           onValuesChange={(changed, all) => {
             if (editingId) return;
@@ -217,10 +218,14 @@ export default function DocumentsPage() {
             }
           }}>
           <Space align="start" wrap>
-            <Form.Item name="registrationNumber" label="Реєстраційний №"
+            <Form.Item label="Реєстраційний №"
               tooltip="Залиште порожнім — номер згенерується автоматично за патерном організації">
-              <Input style={{ width: 180 }} placeholder="авто"
-                addonAfter={<a onClick={genNumber} title="Підібрати номер">авто</a>} />
+              <Space.Compact>
+                <Form.Item name="registrationNumber" noStyle>
+                  <Input style={{ width: 140 }} placeholder="авто" />
+                </Form.Item>
+                <Button onClick={genNumber} title="Підібрати номер за патерном організації">авто</Button>
+              </Space.Compact>
             </Form.Item>
             <Form.Item name="registrationYear" label="Рік" rules={[{ required: true }]}>
               <InputNumber style={{ width: 100 }} min={1990} max={2100} />

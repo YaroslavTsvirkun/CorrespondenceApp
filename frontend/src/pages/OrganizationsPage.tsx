@@ -71,6 +71,7 @@ export default function OrganizationsPage() {
   };
   const openEdit = (d: Dto) => {
     setEditing(d);
+    form.resetFields();
     form.setFieldsValue({ name: d.name, code: d.code, parentOrganizationId: d.parentOrganizationId ?? null,
       isActive: d.isActive, registrationNumberPattern: d.registrationNumberPattern });
     setOpen(true);
@@ -126,7 +127,7 @@ export default function OrganizationsPage() {
       </Card>
 
       <Modal open={open} title={editing ? `Організація: ${editing.name}` : 'Нова організація'}
-        onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" destroyOnHidden>
+        onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" forceRender>
         <Form form={form} layout="vertical" style={{ marginTop: 12 }} onValuesChange={onValuesChange}>
           <Form.Item name="name" label="Назва" rules={[{ required: true, message: 'Вкажіть назву' }]}>
             <Input />

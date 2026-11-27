@@ -23,7 +23,7 @@ export default function BanksPage() {
     || (b.shortName ?? '').toLowerCase().includes(q));
 
   const openAdd = () => { setEditing(null); form.resetFields(); form.setFieldsValue({ isActive: true }); setOpen(true); };
-  const openEdit = (b: Bank) => { setEditing(b); form.setFieldsValue(b); setOpen(true); };
+  const openEdit = (b: Bank) => { setEditing(b); form.resetFields(); form.setFieldsValue(b); setOpen(true); };
   const submit = async () => {
     const v = await form.validateFields();
     if (await save(editing?.id, v)) setOpen(false);
@@ -69,7 +69,7 @@ export default function BanksPage() {
       </Card>
 
       <Modal open={open} title={editing ? 'Редагування банку' : 'Новий банк'} onCancel={() => setOpen(false)}
-        onOk={submit} okText="Зберегти" cancelText="Скасувати" destroyOnHidden>
+        onOk={submit} okText="Зберегти" cancelText="Скасувати" forceRender>
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="mfo" label="МФО" rules={[{ required: true, pattern: /^\d{6}$/, message: 'МФО — 6 цифр' }]}>
             <Input maxLength={6} style={{ fontFamily: 'monospace', width: 140 }} />

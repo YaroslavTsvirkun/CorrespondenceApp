@@ -53,6 +53,7 @@ export default function BankAccountsTab({ partyId, accounts, onChanged }: Props)
   };
   const openEdit = (a: BankAccount) => {
     setEditing(a);
+    form.resetFields();
     form.setFieldsValue({ ...a, iban: formatIban(a.iban), closedAt: a.closedAt ? dayjs(a.closedAt) : undefined });
     setOpen(true);
   };
@@ -91,7 +92,7 @@ export default function BankAccountsTab({ partyId, accounts, onChanged }: Props)
     { title: 'Призначення', dataIndex: 'purpose', width: 160, render: (v) => v || '—' },
     { title: 'Статус', dataIndex: 'closedAt', width: 170,
       render: (v, a) => (
-        <Space direction="vertical" size={2}>
+        <Space orientation="vertical" size={2}>
           {v ? <Tag>Закрито {dayjs(v).format('DD.MM.YYYY')}</Tag> : <Tag color="green">Відкритий</Tag>}
           {a.lastChangedAt && !v && dayjs().diff(fromUtc(a.lastChangedAt), 'day') < RECENT_DAYS && (
             <Tooltip title={`Рахунок додано або змінено ${fromUtc(a.lastChangedAt).format('DD.MM.YYYY HH:mm')}`
@@ -131,7 +132,7 @@ export default function BankAccountsTab({ partyId, accounts, onChanged }: Props)
       {historyOpen && <BankAccountHistory partyId={partyId} onClose={() => setHistoryOpen(false)} />}
 
       <Modal open={open} title={editing ? 'Редагування рахунку' : 'Новий рахунок'} width={560}
-        onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" destroyOnHidden>
+        onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" forceRender>
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="iban" label="IBAN" rules={[{
             validator: (_, v) => (v && isValidIban(v) ? Promise.resolve()

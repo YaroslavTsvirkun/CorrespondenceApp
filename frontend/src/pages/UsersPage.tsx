@@ -60,6 +60,7 @@ export default function UsersPage() {
   };
   const openEdit = (u: UserDto) => {
     setEditing(u);
+    form.resetFields();
     form.setFieldsValue({
       userName: u.userName, password: '', fullName: u.fullName,
       organizationId: u.organizationId ?? null, employeeId: u.employeeId ?? null,
@@ -125,7 +126,7 @@ export default function UsersPage() {
       </Card>
 
       <Modal open={open} title={editing ? `Користувач: ${editing.userName}` : 'Новий користувач'}
-        onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" destroyOnHidden>
+        onCancel={() => setOpen(false)} onOk={submit} okText="Зберегти" cancelText="Скасувати" forceRender>
         <Form form={form} layout="vertical" style={{ marginTop: 12 }}>
           <Form.Item name="fullName" label="ПІБ" rules={[{ required: true, message: 'Вкажіть ПІБ' }]}>
             <Input />
