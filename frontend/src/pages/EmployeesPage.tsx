@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
-  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
+  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
@@ -23,7 +23,14 @@ export default function EmployeesPage() {
   const [editing, setEditing] = useState<Dto | null>(null);
   const [form] = Form.useForm();
 
+  const [tab, setTab] = useState<'active' | 'inactive'>('active');
+
   const { rows, loading, save, remove } = useCrud<Dto>('/api/employees');
+  // Неактивні працівники винесено на окрему вкладку, щоб не захаращувати основний список
+  const activeCount = useMemo(() => rows.filter((r) => r.isActive).length, [rows]);
+  const inactiveCount = rows.length - activeCount;
+  const visibleRows = useMemo(
+    () => rows.filter((r) => r.isActive === (tab === 'active')), [rows, tab]);
 
   const openAdd = () => { setEditing(null); form.resetFields(); form.setFieldsValue({ isActive: true }); setOpen(true); };
   const openEdit = (e: Dto) => { setEditing(e); form.setFieldsValue(e); setOpen(true); };
@@ -38,8 +45,6 @@ export default function EmployeesPage() {
     { title: 'Підрозділ', dataIndex: 'departmentName', width: 180 },
     { title: 'Телефон', dataIndex: 'phone', width: 150, render: (v) => v || '—' },
     { title: 'Ел. пошта', dataIndex: 'email', width: 180, render: (v) => v || '—' },
-    { title: 'Активний', dataIndex: 'isActive', width: 110, align: 'center',
-      render: (v: boolean) => (v ? <Tag color="green">Так</Tag> : <Tag>Ні</Tag>) },
     ...(editable ? [{
       title: 'Дії', key: 'a', width: 110, fixed: 'right' as const,
       render: (_: unknown, r: Dto) => (
@@ -58,11 +63,18 @@ export default function EmployeesPage() {
       <Typography.Title level={3}>Працівники</Typography.Title>
       <Card>
         <div className="toolbar">
+          <Tabs activeKey={tab} onChange={(k) => setTab(k as 'active' | 'inactive')}
+            tabBarStyle={{ margin: 0 }}
+            items={[
+              { key: 'active', label: `Активні (${activeCount})` },
+              { key: 'inactive', label: `Неактивні (${inactiveCount})` },
+            ]} />
           <span className="spacer" />
           {editable && <Button type="primary" icon={<PlusOutlined />} onClick={openAdd}>Додати</Button>}
         </div>
-        <Table rowKey="id" columns={columns} dataSource={rows} size="middle" loading={loading}
-          scroll={{ x: 1000 }} pagination={{ pageSize: 10 }} />
+        <Table rowKey="id" columns={columns} dataSource={visibleRows} size="middle" loading={loading}
+          scroll={{ x: 1000 }} pagination={{ pageSize: 10 }}
+          locale={{ emptyText: tab === 'active' ? 'Немає активних працівників' : 'Немає неактивних працівників' }} />
       </Card>
 
       <Modal open={open} title={editing ? 'Редагування працівника' : 'Новий працівник'}
