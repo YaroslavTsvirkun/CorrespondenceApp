@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import {
-  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
+  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
@@ -37,15 +37,22 @@ export default function DepartmentsPage() {
   const [editing, setEditing] = useState<Dto | null>(null);
   const [form] = Form.useForm();
   const formOrgId = Form.useWatch('organizationId', form);
+  const [tab, setTab] = useState<'active' | 'inactive'>('active');
 
   const { rows, loading, save, remove } = useCrud<Dto>('/api/departments');
   // Список організацій для вибору — лише супер-адміну
   const loadOrgs = useCallback(
     () => (isSuper ? api<OrgOpt[]>('/api/organizations') : Promise.resolve<OrgOpt[]>([])), [isSuper]);
   const { data: orgs } = useApiData(loadOrgs, []);
-  const expansion = useExpandAll(useMemo(() => rows.map((r) => r.id), [rows]));
+  // Неактивні підрозділи винесено на окрему вкладку, щоб не захаращувати основний список.
+  // Якщо батьківський підрозділ на іншій вкладці, підрозділ показується кореневим.
+  const activeCount = useMemo(() => rows.filter((r) => r.isActive).length, [rows]);
+  const inactiveCount = rows.length - activeCount;
+  const visibleRows = useMemo(
+    () => rows.filter((r) => r.isActive === (tab === 'active')), [rows, tab]);
+  const expansion = useExpandAll(useMemo(() => visibleRows.map((r) => r.id), [visibleRows]));
 
-  const tree = useMemo(() => buildTree(rows), [rows]);
+  const tree = useMemo(() => buildTree(visibleRows), [visibleRows]);
   const showOrg = isSuper && new Set(rows.map((r) => r.organizationId)).size > 1;
 
   // Кандидати в батьки: підрозділи тієї ж організації, крім самого себе
@@ -79,10 +86,6 @@ export default function DepartmentsPage() {
     { title: 'Скорочено', dataIndex: 'shortName', width: 130, render: (v) => v || '—' },
     ...(showOrg ? [{ title: 'Організація', dataIndex: 'organizationName', width: 170 } as const] : []),
     { title: 'Працівників', dataIndex: 'employeeCount', width: 120, align: 'center' as const },
-    {
-      title: 'Активний', dataIndex: 'isActive', width: 100, align: 'center' as const,
-      render: (v: boolean) => (v ? <Tag color="green">Так</Tag> : <Tag>Ні</Tag>),
-    },
     ...(editable ? [{
       title: 'Дії', key: 'a', width: 150, fixed: 'right' as const,
       render: (_: unknown, r: TreeRow) => (
@@ -103,15 +106,22 @@ export default function DepartmentsPage() {
       <Typography.Title level={3}>Підрозділи</Typography.Title>
       <Typography.Paragraph type="secondary">
         Деревовидна структура підпорядкування підрозділів. Кнопка «+» у рядку створює
-        підпорядкований підрозділ.
+        підпорядкований підрозділ. Неактивні підрозділи — на окремій вкладці.
       </Typography.Paragraph>
       <Card>
         <div className="toolbar">
+          <Tabs activeKey={tab} onChange={(k) => setTab(k as 'active' | 'inactive')}
+            tabBarStyle={{ margin: 0 }}
+            items={[
+              { key: 'active', label: `Активні (${activeCount})` },
+              { key: 'inactive', label: `Неактивні (${inactiveCount})` },
+            ]} />
           <span className="spacer" />
           {editable && <Button type="primary" icon={<PlusOutlined />} onClick={() => openAdd()}>Додати</Button>}
         </div>
         <Table<TreeRow> rowKey="id" columns={columns} dataSource={tree} size="middle" loading={loading}
           pagination={false}
+          locale={{ emptyText: tab === 'active' ? 'Немає активних підрозділів' : 'Немає неактивних підрозділів' }}
           expandable={{ ...expansion, indentSize: 24 }} />
       </Card>
 
