@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, Typography,
+  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, ApartmentOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
@@ -29,11 +29,19 @@ export default function OrganizationsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Dto | null>(null);
   const [form] = Form.useForm();
+  const [tab, setTab] = useState<'active' | 'inactive'>('active');
 
   const { rows, loading, save, remove } = useCrud<Dto>('/api/organizations');
-  const expansion = useExpandAll(useMemo(() => rows.map((r) => r.id), [rows]));
 
-  const tree = useMemo(() => buildTree(rows), [rows]);
+  // Неактивні організації винесено на окрему вкладку, щоб не захаращувати основний список.
+  // Якщо материнська організація на іншій вкладці, організація показується кореневою.
+  const activeCount = useMemo(() => rows.filter((r) => r.isActive).length, [rows]);
+  const inactiveCount = rows.length - activeCount;
+  const visibleRows = useMemo(
+    () => rows.filter((r) => r.isActive === (tab === 'active')), [rows, tab]);
+  const expansion = useExpandAll(useMemo(() => visibleRows.map((r) => r.id), [visibleRows]));
+
+  const tree = useMemo(() => buildTree(visibleRows), [visibleRows]);
   // Кандидати в батьки: усі, крім самого себе (захист від циклів — на бекенді)
   const parentOptions = useMemo(
     () => rows.filter((r) => r.id !== editing?.id).map((r) => ({ value: r.id, label: r.name })),
@@ -62,10 +70,6 @@ export default function OrganizationsPage() {
     { title: 'Підрозділів', dataIndex: 'departmentCount', width: 120, align: 'center' },
     { title: 'Користувачів', dataIndex: 'userCount', width: 120, align: 'center' },
     {
-      title: 'Активна', dataIndex: 'isActive', width: 100, align: 'center',
-      render: (v: boolean) => (v ? <Tag color="green">Так</Tag> : <Tag>Ні</Tag>),
-    },
-    {
       title: 'Дії', key: 'a', width: 150, fixed: 'right',
       render: (_, r) => (
         <Space>
@@ -84,16 +88,23 @@ export default function OrganizationsPage() {
       <Typography.Title level={3}><ApartmentOutlined /> Організації</Typography.Title>
       <Typography.Paragraph type="secondary">
         Деревовидна структура організацій. Кожна організація ізольована: її користувачі бачать
-        лише власні дані. Адміністратор організації керує лише своєю організацією.
+        лише власні дані. Адміністратор організації керує лише своєю організацією. Неактивні організації — на окремій вкладці.
       </Typography.Paragraph>
       <Card>
         <div className="toolbar">
+          <Tabs activeKey={tab} onChange={(k) => setTab(k as 'active' | 'inactive')}
+            tabBarStyle={{ margin: 0 }}
+            items={[
+              { key: 'active', label: `Активні (${activeCount})` },
+              { key: 'inactive', label: `Неактивні (${inactiveCount})` },
+            ]} />
           <span className="spacer" />
           <Button type="primary" icon={<PlusOutlined />} onClick={() => openAdd()}>Додати організацію</Button>
         </div>
         <Table<TreeRow>
           rowKey="id" columns={columns} dataSource={tree} loading={loading}
           pagination={false} size="middle"
+          locale={{ emptyText: tab === 'active' ? 'Немає активних організацій' : 'Немає неактивних організацій' }}
           expandable={{ ...expansion, indentSize: 24 }}
         />
       </Card>
