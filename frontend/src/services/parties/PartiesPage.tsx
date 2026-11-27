@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import {
-  Button, Card, Input, Popconfirm, Segmented, Select, Space, Table, Tag, Tooltip, Typography,
+  Button, Card, Input, Popconfirm, Select, Space, Table, Tabs, Tag, Tooltip, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined, SearchOutlined, EyeOutlined, BankOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
@@ -14,24 +14,28 @@ import { KIND_COLORS, type PartyListItem } from './types';
 
 const kindName = (k: number) => PARTY_KINDS.find((x) => x.id === k)?.name ?? '—';
 
-/** Реєстр контрагентів: пошук за назвою або кодом, фільтр за видом і статусом, картка в бічній панелі. */
+/** Реєстр контрагентів: пошук за назвою або кодом, фільтр за видом, вкладки активних і неактивних, картка в бічній панелі. */
 export default function PartiesPage() {
   const { can } = useAuth();
   const editable = can(P.parties);
   const { reload: reloadLookups } = useLookups();
   const [search, setSearch] = useState('');
   const [kind, setKind] = useState<number | undefined>();
-  const [status, setStatus] = useState<'active' | 'all' | 'inactive'>('active');
+  const [tab, setTab] = useState<'active' | 'inactive'>('active');
   const [openId, setOpenId] = useState<number | 'new' | null>(null);
 
   // Список кореспондентів у формі документа (lookups) теж оновлюється після змін
   const { rows, loading, reload, remove } = useCrud<PartyListItem>('/api/parties?includeInactive=true', reloadLookups);
 
   const q = search.trim().toLowerCase();
-  const data = rows.filter((p) =>
+  const matched = rows.filter((p) =>
     (!q || p.fullName.toLowerCase().includes(q) || (p.shortName ?? '').toLowerCase().includes(q) || (p.code ?? '').includes(q))
-    && (kind == null || p.kind === kind)
-    && (status === 'all' || p.isActive === (status === 'active')));
+    && (kind == null || p.kind === kind));
+  // Неактивні контрагенти винесено на окрему вкладку, щоб не захаращувати основний список.
+  // Лічильники на вкладках враховують пошук і фільтр за видом.
+  const activeCount = matched.filter((p) => p.isActive).length;
+  const inactiveCount = matched.length - activeCount;
+  const data = matched.filter((p) => p.isActive === (tab === 'active'));
 
   const close = useCallback(() => setOpenId(null), []);
   // Новий контрагент після збереження лишається відкритим (картка сама перечитує себе) — щоб додати рахунки
@@ -43,7 +47,6 @@ export default function PartiesPage() {
       render: (_, p) => (
         <>
           <Typography.Link onClick={() => setOpenId(p.id)} style={{ fontWeight: 500 }}>{p.shortName ?? p.fullName}</Typography.Link>
-          {!p.isActive && <Tag style={{ marginInlineStart: 8 }}>Неактивний</Tag>}
           {p.shortName && <div style={{ fontSize: 12, color: '#8c8c8c' }}>{p.fullName}</div>}
           {p.parentName && <div style={{ fontSize: 12, color: '#8c8c8c' }}>Філія: {p.parentName}</div>}
         </>
@@ -84,17 +87,22 @@ export default function PartiesPage() {
       <Typography.Title level={3}>Контрагенти</Typography.Title>
       <Card>
         <div className="toolbar">
+          <Tabs activeKey={tab} onChange={(k) => setTab(k as 'active' | 'inactive')}
+            tabBarStyle={{ margin: 0 }}
+            items={[
+              { key: 'active', label: `Активні (${activeCount})` },
+              { key: 'inactive', label: `Неактивні (${inactiveCount})` },
+            ]} />
           <Input allowClear prefix={<SearchOutlined />} placeholder="Назва, ПІБ або код ЄДРПОУ / РНОКПП" style={{ width: 300 }}
             value={search} onChange={(e) => setSearch(e.target.value)} />
           <Select allowClear placeholder="Усі види" style={{ width: 230 }} value={kind} onChange={setKind}
             options={PARTY_KINDS.map((k) => ({ value: k.id, label: k.name }))} />
-          <Segmented value={status} onChange={(v) => setStatus(v as typeof status)}
-            options={[{ value: 'active', label: 'Діючі' }, { value: 'inactive', label: 'Неактивні' }, { value: 'all', label: 'Усі' }]} />
           <span className="spacer" />
           {editable && <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpenId('new')}>Додати</Button>}
         </div>
         <Table rowKey="id" columns={columns} dataSource={data} size="middle" loading={loading}
-          scroll={{ x: 1100 }} pagination={{ pageSize: 15 }} />
+          scroll={{ x: 1100 }} pagination={{ pageSize: 15 }}
+          locale={{ emptyText: tab === 'active' ? 'Немає активних контрагентів' : 'Немає неактивних контрагентів' }} />
       </Card>
 
       <PartyDrawer partyId={openId} parties={rows} onClose={close} onSaved={saved} />
