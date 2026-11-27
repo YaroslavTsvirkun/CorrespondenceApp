@@ -6,7 +6,6 @@ public record LookupsDto(
     IReadOnlyList<LookupOption> DocumentTypes,
     IReadOnlyList<StatusOption> DocumentStatuses,
     IReadOnlyList<LookupOption> Channels,
-    IReadOnlyList<LookupOption> CorrespondentTypes,
     IReadOnlyList<StatusOption> TaskStatuses,
     IReadOnlyList<LookupOption> Departments,
     IReadOnlyList<LookupOption> Employees,

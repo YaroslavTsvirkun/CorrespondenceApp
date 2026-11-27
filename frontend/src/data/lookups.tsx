@@ -11,7 +11,6 @@ export interface Lookups {
   documentTypes: Option[];
   documentStatuses: StatusOption[];
   channels: Option[];
-  correspondentTypes: Option[];
   taskStatuses: StatusOption[];
   departments: Option[];
   employees: Option[];
@@ -20,7 +19,7 @@ export interface Lookups {
 
 const EMPTY: Lookups = {
   directions: [], documentTypes: [], documentStatuses: [], channels: [],
-  correspondentTypes: [], taskStatuses: [], departments: [], employees: [], correspondents: [],
+  taskStatuses: [], departments: [], employees: [], correspondents: [],
 };
 
 /** ready — довідники поточного користувача отримано (або спроба завершилась помилкою). */

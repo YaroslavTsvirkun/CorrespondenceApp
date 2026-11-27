@@ -7,7 +7,7 @@ namespace CorrespondenceApi.Features.Dictionaries;
 
 /// <summary>
 /// Фіча «Довідники»: узагальнений CRUD для простих довідників {id, name, description}.
-/// kind = document-types | channels | correspondent-types.
+/// kind = document-types | channels (право dictionaries.manage) | legal-forms | party-categories (parties.manage).
 /// </summary>
 public static class DictionariesEndpoints
 {
@@ -22,18 +22,18 @@ public static class DictionariesEndpoints
         {
             var id = await m.Send(new SaveDictionaryItem.Command(kind, null, i), ct);
             return Results.Created($"/api/dictionaries/{kind}/{id}", new { id });
-        }).RequireAuthorization(Permissions.DictionariesManage);
+        }).RequireAuthorization(Permissions.DictionariesWrite);
 
         g.MapPut("/{kind}/{id:int}", async (ISender m, string kind, int id, DictionaryItemInput i, CancellationToken ct) =>
         {
             await m.Send(new SaveDictionaryItem.Command(kind, id, i), ct);
             return Results.NoContent();
-        }).RequireAuthorization(Permissions.DictionariesManage);
+        }).RequireAuthorization(Permissions.DictionariesWrite);
 
         g.MapDelete("/{kind}/{id:int}", async (ISender m, string kind, int id, CancellationToken ct) =>
         {
             await m.Send(new DeleteDictionaryItem.Command(kind, id), ct);
             return Results.NoContent();
-        }).RequireAuthorization(Permissions.DictionariesManage);
+        }).RequireAuthorization(Permissions.DictionariesWrite);
     }
 }

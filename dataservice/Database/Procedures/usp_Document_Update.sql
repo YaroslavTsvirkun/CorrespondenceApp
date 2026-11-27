@@ -40,6 +40,21 @@ BEGIN
         THROW 50404, @Message, 1;
     END;
 
+    -- Кореспондент — контрагент з реєстру організації документа
+    IF @CorrespondentId IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM dbo.Party WHERE Id = @CorrespondentId AND OrganizationId = @OrganizationId)
+        THROW 50400, N'Кореспондента не знайдено в реєстрі контрагентів організації документа', 1;
+
+    -- Підрозділи, автор і реєстратор — з організації документа
+    IF EXISTS (SELECT 1 FROM (VALUES (@SenderDepartmentId), (@ReceiverDepartmentId)) AS x (Id)
+               WHERE x.Id IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM dbo.Department d WHERE d.Id = x.Id AND d.OrganizationId = @OrganizationId))
+        THROW 50400, N'Підрозділ не належить організації документа', 1;
+    IF EXISTS (SELECT 1 FROM (VALUES (@AuthorEmployeeId), (@RegistrarEmployeeId)) AS x (Id)
+               WHERE x.Id IS NOT NULL
+                 AND NOT EXISTS (SELECT 1 FROM dbo.Employee e WHERE e.Id = x.Id AND e.OrganizationId = @OrganizationId))
+        THROW 50400, N'Автор або реєстратор не належить організації документа', 1;
+
     SET @RegistrationNumber = NULLIF(TRIM(@RegistrationNumber), N'');
     IF @RegistrationNumber IS NOT NULL
        AND dbo.fn_IsRegistrationNumberTaken(@OrganizationId, @RegistrationYear, @RegistrationNumber, @Id) = 1

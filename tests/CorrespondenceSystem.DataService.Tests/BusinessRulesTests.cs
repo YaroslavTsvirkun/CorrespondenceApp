@@ -1,6 +1,11 @@
 using System.Net;
-using CorrespondenceSystem.Contracts.Correspondents;
-using CorrespondenceSystem.Contracts.Correspondents.Dtos;
+using CorrespondenceSystem.Contracts.Common;
+using CorrespondenceSystem.Contracts.Departments;
+using CorrespondenceSystem.Contracts.Departments.Dtos;
+using CorrespondenceSystem.Contracts.Employees;
+using CorrespondenceSystem.Contracts.Employees.Dtos;
+using CorrespondenceSystem.Contracts.Parties;
+using CorrespondenceSystem.Contracts.Parties.Dtos;
 using CorrespondenceSystem.Contracts.Dictionaries;
 using CorrespondenceSystem.Contracts.Dictionaries.Dtos;
 using CorrespondenceSystem.Contracts.Documents;
@@ -121,18 +126,77 @@ public sealed class BusinessRulesTests(DataServiceFactory app)
     public async Task Organization_admin_cannot_change_another_organizations_records()
     {
         var registrar = await UserId("registrar", "registrar123");
-        var org1Correspondent = (await app.RpcOkAsync<IReadOnlyList<CorrespondentDto>>(new GetCorrespondents.Query(), registrar))[0];
+        var org1Party = (await app.RpcOkAsync<IReadOnlyList<PartyListItem>>(new GetParties.Query(), registrar))[0];
 
         var orgAdmin2 = await UserId("orgadmin2", "orgadmin123");
-        var update = await app.RpcAsync(new SaveCorrespondent.Command(org1Correspondent.Id, new CorrespondentInput(
-            org1Correspondent.CorrespondentTypeId, "Підмінено", null, null, null, null, null)), orgAdmin2);
+        var read = await app.RpcAsync(new GetParty.Query(org1Party.Id), orgAdmin2);
+        Assert.Equal(HttpStatusCode.NotFound, read.StatusCode);
+
+        var update = await app.RpcAsync(new SaveParty.Command(org1Party.Id, new PartyInput(
+            PartyKind.LegalEntity, "Підмінено", null, null, null, null, true, null)), orgAdmin2);
         Assert.Equal(HttpStatusCode.NotFound, update.StatusCode);
 
-        var delete = await app.RpcAsync(new DeleteCorrespondent.Command(org1Correspondent.Id), orgAdmin2);
+        var account = await app.RpcAsync(new SaveBankAccount.Command(org1Party.Id, null, new BankAccountInput(
+            "UA183052990000026007052612345", null, null, "UAH", null, null, false, null, null)), orgAdmin2);
+        Assert.Equal(HttpStatusCode.NotFound, account.StatusCode);
+
+        var delete = await app.RpcAsync(new DeleteParty.Command(org1Party.Id), orgAdmin2);
         Assert.Equal(HttpStatusCode.NotFound, delete.StatusCode);
 
-        var unchanged = (await app.RpcOkAsync<IReadOnlyList<CorrespondentDto>>(new GetCorrespondents.Query(), registrar))
-            .Single(c => c.Id == org1Correspondent.Id);
-        Assert.Equal(org1Correspondent.Name, unchanged.Name);
+        var unchanged = await app.RpcOkAsync<PartyDetail>(new GetParty.Query(org1Party.Id), registrar);
+        Assert.Equal(org1Party.FullName, unchanged.FullName);
+    }
+
+    [Fact]
+    public async Task Document_cannot_reference_another_organizations_records()
+    {
+        var registrar = await app.LoginAsync("registrar", "registrar123");
+        var lookups = await app.RpcOkAsync<LookupsDto>(new GetLookups.Query(), registrar.UserId);
+
+        // Записи організації «Вектор» (org2) — очима її адміністратора
+        var orgAdmin2 = await UserId("orgadmin2", "orgadmin123");
+        var foreignParty = (await app.RpcOkAsync<IReadOnlyList<PartyListItem>>(new GetParties.Query(), orgAdmin2))[0].Id;
+        var foreignDepartment = (await app.RpcOkAsync<IReadOnlyList<DepartmentDto>>(new GetDepartments.Query(), orgAdmin2))[0].Id;
+        var foreignEmployee = (await app.RpcOkAsync<IReadOnlyList<EmployeeDto>>(new GetEmployees.Query(), orgAdmin2))[0].Id;
+
+        var valid = new DocumentInput(
+            lookups.Directions[0].Id, lookups.DocumentTypes[0].Id, lookups.DocumentStatuses[0].Id, null, null,
+            null, null, null, "Чужі записи", null, DateOnly.FromDateTime(DateTime.Today), null, false, null,
+            null, DateTime.UtcNow.Year + 2, registrar.EmployeeId!.Value);
+        DocumentInput[] invalid =
+        [
+            valid with { CorrespondentId = foreignParty },
+            valid with { SenderDepartmentId = foreignDepartment },
+            valid with { ReceiverDepartmentId = foreignDepartment },
+            valid with { AuthorEmployeeId = foreignEmployee },
+            valid with { RegistrarEmployeeId = foreignEmployee },
+        ];
+
+        foreach (var input in invalid)
+        {
+            var create = await app.RpcAsync(new CreateDocument.Command(input), registrar.UserId);
+            Assert.Equal(HttpStatusCode.BadRequest, create.StatusCode);
+            Assert.Contains("організації документа", await create.Content.ReadAsStringAsync());
+        }
+
+        var documentId = (await app.RpcOkAsync<PagedResult<DocumentListItem>>(new GetDocuments.Query(), registrar.UserId)).Items[0].Id;
+        var current = await app.RpcOkAsync<DocumentInput>(new GetDocumentForEdit.Query(documentId), registrar.UserId);
+        DocumentInput[] invalidUpdates =
+        [
+            current with { CorrespondentId = foreignParty },
+            current with { SenderDepartmentId = foreignDepartment },
+            current with { ReceiverDepartmentId = foreignDepartment },
+            current with { AuthorEmployeeId = foreignEmployee },
+        ];
+        foreach (var input in invalidUpdates)
+        {
+            var update = await app.RpcAsync(new UpdateDocument.Command(documentId, input), registrar.UserId);
+            Assert.Equal(HttpStatusCode.BadRequest, update.StatusCode);
+            Assert.Contains("організації документа", await update.Content.ReadAsStringAsync());
+        }
+
+        // Документ зі своїми записами зберігається як і раніше
+        await EnsureStatusAsync(await app.RpcAsync(new UpdateDocument.Command(documentId, current), registrar.UserId),
+            HttpStatusCode.NoContent);
     }
 }

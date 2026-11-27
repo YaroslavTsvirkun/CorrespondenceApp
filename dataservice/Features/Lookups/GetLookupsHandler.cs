@@ -14,23 +14,27 @@ public sealed class GetLookupsHandler(Db db, ICurrentUser user) : IRequestHandle
     public async Task<LookupsDto> Handle(GetLookups.Query q, CancellationToken ct)
     {
         await using var c = await db.OpenAsync(ct);
+        // Кореспонденти документів — контрагенти організації; неактивні позначено (лишаються в старих документах)
         using var grid = await c.QueryMultipleAsync(new CommandDefinition($"""
             SELECT Id, Code, Name FROM dbo.DocumentDirection ORDER BY Id;
             SELECT Id, Name FROM dbo.DocumentType ORDER BY Name;
             SELECT Id, Name, IsFinal FROM dbo.DocumentStatus ORDER BY Id;
             SELECT Id, Name FROM dbo.DeliveryChannel ORDER BY Name;
-            SELECT Id, Name FROM dbo.CorrespondentType ORDER BY Name;
             SELECT Id, Name, IsFinal FROM dbo.TaskStatus ORDER BY Id;
             SELECT d.Id, d.Name FROM dbo.Department d WHERE {SqlScope.TenantFilter("d")} ORDER BY d.Name;
             SELECT e.Id, e.FullName AS Name FROM dbo.Employee e WHERE {SqlScope.TenantFilter("e")} ORDER BY e.FullName;
-            SELECT x.Id, x.Name FROM dbo.Correspondent x WHERE {SqlScope.TenantFilter("x")} ORDER BY x.Name;
+            SELECT x.Id,
+                   CONCAT(COALESCE(x.ShortName, x.FullName),
+                          CASE WHEN x.Code IS NOT NULL THEN CONCAT(N' (', x.Code, N')') END,
+                          CASE WHEN x.IsActive = 0 THEN N' — неактивний' END) AS Name
+            FROM dbo.Party x WHERE {SqlScope.TenantFilter("x")}
+            ORDER BY x.IsActive DESC, COALESCE(x.ShortName, x.FullName);
             """, SqlScope.Tenant(user), cancellationToken: ct));
 
         return new LookupsDto(
             (await grid.ReadAsync<DirectionOption>()).AsList(),
             (await grid.ReadAsync<LookupOption>()).AsList(),
             (await grid.ReadAsync<StatusOption>()).AsList(),
-            (await grid.ReadAsync<LookupOption>()).AsList(),
             (await grid.ReadAsync<LookupOption>()).AsList(),
             (await grid.ReadAsync<StatusOption>()).AsList(),
             (await grid.ReadAsync<LookupOption>()).AsList(),

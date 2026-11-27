@@ -1,4 +1,5 @@
 using System.Data;
+using CorrespondenceSystem.Contracts.Parties.Dtos;
 using Dapper;
 namespace CorrespondenceSystem.DataService.Infrastructure.Database;
 
@@ -26,6 +27,51 @@ public static class SqlTvp
             t.Rows.Add(code);
         return t.AsTableValuedParameter("dbo.CodeList");
     }
+
+    /// <summary>dbo.PartyAddressList — адреси контрагента (порожні рядки → NULL).</summary>
+    public static SqlMapper.ICustomQueryParameter PartyAddresses(IEnumerable<PartyAddressItem> items)
+    {
+        var t = Table("RowNo", "Kind", "Country", "PostalCode", "Region", "City", "Line");
+        t.Columns["Kind"]!.DataType = typeof(byte);
+        var row = 0;
+        foreach (var a in items)
+            t.Rows.Add(++row, a.Kind, Db(a.Country), Db(a.PostalCode), Db(a.Region), Db(a.City), Db(a.Line));
+        return t.AsTableValuedParameter("dbo.PartyAddressList");
+    }
+
+    /// <summary>dbo.PartyContactList — контакти контрагента.</summary>
+    public static SqlMapper.ICustomQueryParameter PartyContacts(IEnumerable<PartyContactItem> items)
+    {
+        var t = Table("RowNo", "Kind", "Value", "IsPrimary", "Note");
+        t.Columns["Kind"]!.DataType = typeof(byte);
+        t.Columns["IsPrimary"]!.DataType = typeof(bool);
+        var row = 0;
+        foreach (var c in items)
+            t.Rows.Add(++row, c.Kind, c.Value.Trim(), c.IsPrimary, Db(c.Note));
+        return t.AsTableValuedParameter("dbo.PartyContactList");
+    }
+
+    /// <summary>dbo.PartyPersonList — контактні особи контрагента.</summary>
+    public static SqlMapper.ICustomQueryParameter PartyPersons(IEnumerable<PartyPersonItem> items)
+    {
+        var t = Table("RowNo", "FullName", "PositionName", "Phone", "Email", "IsSignatory", "Note");
+        t.Columns["IsSignatory"]!.DataType = typeof(bool);
+        var row = 0;
+        foreach (var p in items)
+            t.Rows.Add(++row, p.FullName.Trim(), Db(p.PositionName), Db(p.Phone), Db(p.Email), p.IsSignatory, Db(p.Note));
+        return t.AsTableValuedParameter("dbo.PartyPersonList");
+    }
+
+    /// <summary>Таблиця з колонкою RowNo (int) і текстовими колонками; типи інших колонок задає виклик.</summary>
+    private static DataTable Table(string rowNo, params string[] columns)
+    {
+        var t = new DataTable();
+        t.Columns.Add(rowNo, typeof(int));
+        foreach (var c in columns) t.Columns.Add(c, typeof(string));
+        return t;
+    }
+
+    private static object Db(string? s) => string.IsNullOrWhiteSpace(s) ? DBNull.Value : s.Trim();
 
     /// <summary>dbo.TaskAssignmentList — набір доручень (рядки нумеруються за порядком).</summary>
     public static SqlMapper.ICustomQueryParameter TaskAssignments(

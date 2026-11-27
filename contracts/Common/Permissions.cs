@@ -12,7 +12,8 @@ public static class Permissions
     public const string ResolutionsCreate = "resolutions.create";
     public const string TasksAssign = "tasks.assign";
     public const string TasksExecute = "tasks.execute";
-    public const string CorrespondentsManage = "correspondents.manage";
+    public const string PartiesManage = "parties.manage";
+    public const string PartiesBankManage = "parties.bank.manage";
     public const string DictionariesManage = "dictionaries.manage";
     public const string EmployeesManage = "employees.manage";
     public const string DepartmentsManage = "departments.manage";
@@ -27,6 +28,7 @@ public static class Permissions
     // Композитні політики (будь-який зі складових пермішенів задовольняє)
     public const string DocumentsReadAny = "documents.read";
     public const string TasksWrite = "tasks.write";
+    public const string DictionariesWrite = "dictionaries.write";
 
     public static readonly string[] ReadScopes =
         [DocumentsReadAll, DocumentsReadDepartment, DocumentsReadInvolved];
@@ -35,5 +37,7 @@ public static class Permissions
     {
         [DocumentsReadAny] = ReadScopes,
         [TasksWrite] = [TasksAssign, TasksExecute],
+        // Довідники кореспонденції (dictionaries.manage) і контрагентів (parties.manage) — див. DictionaryTables
+        [DictionariesWrite] = [DictionariesManage, PartiesManage],
     };
 }

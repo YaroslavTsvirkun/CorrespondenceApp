@@ -1,7 +1,10 @@
 /* =====================================================================
-   001_DemoData.sql — демонстраційні дані (лише з Database:SeedDemoData): організації, підрозділи,
-   працівники, кореспонденти, документи, резолюції та доручення.
+   001_DemoBase.sql — демонстраційні дані (лише з Database:SeedDemoData): організації, підрозділи,
+   працівники, контрагенти (з кодами, адресами, контактами й банківськими рахунками), документи,
+   резолюції та доручення.
    Одноразовий скрипт; пропускається, якщо організації вже існують.
+   Замінив 001_DemoData.sql (з появою реєстру контрагентів): у вже заповнених БД новий файл
+   лише фіксується в журналі — їхніх кореспондентів переносить Schema/006_Parties.sql.
    ===================================================================== */
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
@@ -31,9 +34,14 @@ DECLARE @chMail     int = (SELECT Id FROM dbo.DeliveryChannel WHERE Name = N'П�
         @chEmail    int = (SELECT Id FROM dbo.DeliveryChannel WHERE Name = N'Електронна пошта'),
         @chPersonal int = (SELECT Id FROM dbo.DeliveryChannel WHERE Name = N'Особисте подання');
 
-DECLARE @ctOrg    int = (SELECT Id FROM dbo.CorrespondentType WHERE Name = N'Організація'),
-        @ctPerson int = (SELECT Id FROM dbo.CorrespondentType WHERE Name = N'Фізична особа'),
-        @ctGov    int = (SELECT Id FROM dbo.CorrespondentType WHERE Name = N'Державна установа');
+DECLARE @lfTov int = (SELECT Id FROM dbo.LegalForm WHERE Code = N'ТОВ'),
+        @lfAt  int = (SELECT Id FROM dbo.LegalForm WHERE Code = N'АТ');
+
+DECLARE @bankPrivat   int = (SELECT Id FROM dbo.Bank WHERE Mfo = '305299'),
+        @bankOschad   int = (SELECT Id FROM dbo.Bank WHERE Mfo = '300465'),
+        @bankUniversal int = (SELECT Id FROM dbo.Bank WHERE Mfo = '322001'),
+        @bankRaiff    int = (SELECT Id FROM dbo.Bank WHERE Mfo = '380805'),
+        @bankTreasury int = (SELECT Id FROM dbo.Bank WHERE Mfo = '820172');
 
 DECLARE @tsAssigned   int = (SELECT Id FROM dbo.TaskStatus WHERE Name = N'Призначено'),
         @tsInProgress int = (SELECT Id FROM dbo.TaskStatus WHERE Name = N'У роботі'),
@@ -83,18 +91,74 @@ SET @e6 = SCOPE_IDENTITY();
 INSERT dbo.Employee (OrganizationId, DepartmentId, FullName, PositionName, Email) VALUES (@org2, @gen2, N'Левченко Ірина Олександрівна', N'Діловод', N'levchenko@vektor.ua');
 SET @e7 = SCOPE_IDENTITY();
 
--- ---- Кореспонденти ----
-DECLARE @cor1 int, @cor2 int, @cor3 int, @cor4 int, @cor5 int;
-INSERT dbo.Correspondent (OrganizationId, CorrespondentTypeId, Name, Address, Phone, ContactPerson) VALUES (@org1, @ctOrg, N'ТОВ «Промтехбуд»', N'м. Харків, вул. Сумська, 10', N'057-700-10-20', N'Гнатюк О.П.');
+-- ---- Контрагенти (Kind: 1 — юрособа, 2 — ФОП, 3 — фізособа, 4 — орган влади) ----
+-- Коди ЄДРПОУ / РНОКПП та IBAN вигадані, але з правильними контрольними сумами
+DECLARE @catSupplier int, @catGov int;
+INSERT dbo.PartyCategory (Name) VALUES (N'Постачальник');  SET @catSupplier = SCOPE_IDENTITY();
+INSERT dbo.PartyCategory (Name) VALUES (N'Орган влади');   SET @catGov = SCOPE_IDENTITY();
+
+DECLARE @cor1 int, @cor2 int, @cor3 int, @cor4 int, @cor5 int, @cor4Branch int, @cor6 int;
+INSERT dbo.Party (OrganizationId, Kind, FullName, ShortName, Code, LegalFormId)
+VALUES (@org1, 1, N'ТОВАРИСТВО З ОБМЕЖЕНОЮ ВІДПОВІДАЛЬНІСТЮ «ПРОМТЕХБУД»', N'ТОВ «Промтехбуд»', '32145678', @lfTov);
 SET @cor1 = SCOPE_IDENTITY();
-INSERT dbo.Correspondent (OrganizationId, CorrespondentTypeId, Name, Address) VALUES (@org1, @ctGov, N'Департамент освіти ХОДА', N'м. Харків, пл. Свободи, 5');
+INSERT dbo.Party (OrganizationId, Kind, FullName, ShortName, Code)
+VALUES (@org1, 4, N'Департамент освіти Харківської обласної державної адміністрації', N'Департамент освіти ХОДА', '02142632');
 SET @cor2 = SCOPE_IDENTITY();
-INSERT dbo.Correspondent (OrganizationId, CorrespondentTypeId, Name, Address, Phone) VALUES (@org1, @ctPerson, N'Шевченко Тарас Григорович', N'м. Харків, вул. Полтавський шлях, 44', N'067-123-45-67');
+INSERT dbo.Party (OrganizationId, Kind, FullName, Code)
+VALUES (@org1, 3, N'Шевченко Тарас Григорович', '3124567896');
 SET @cor3 = SCOPE_IDENTITY();
-INSERT dbo.Correspondent (OrganizationId, CorrespondentTypeId, Name, Address, ContactPerson) VALUES (@org1, @ctOrg, N'АТ «Енергопостач»', N'м. Київ, вул. Хрещатик, 1', N'Мороз В.В.');
+INSERT dbo.Party (OrganizationId, Kind, FullName, ShortName, Code, LegalFormId)
+VALUES (@org1, 1, N'АКЦІОНЕРНЕ ТОВАРИСТВО «ЕНЕРГОПОСТАЧ»', N'АТ «Енергопостач»', '23456108', @lfAt);
 SET @cor4 = SCOPE_IDENTITY();
-INSERT dbo.Correspondent (OrganizationId, CorrespondentTypeId, Name, Address) VALUES (@org2, @ctOrg, N'ТОВ «Логістик-Плюс»', N'м. Дніпро, просп. Яворницького, 7');
+INSERT dbo.Party (OrganizationId, Kind, FullName, ShortName, Code, ParentPartyId)
+VALUES (@org1, 1, N'Харківська філія АТ «Енергопостач»', N'Харківська філія «Енергопостач»', '43512783', @cor4);
+SET @cor4Branch = SCOPE_IDENTITY();
+INSERT dbo.Party (OrganizationId, Kind, FullName, ShortName, Code)
+VALUES (@org1, 2, N'Фізична особа-підприємець Коваль Андрій Миколайович', N'ФОП Коваль А.М.', '2987654320');
+SET @cor6 = SCOPE_IDENTITY();
+INSERT dbo.Party (OrganizationId, Kind, FullName, ShortName, Code, LegalFormId)
+VALUES (@org2, 1, N'ТОВАРИСТВО З ОБМЕЖЕНОЮ ВІДПОВІДАЛЬНІСТЮ «ЛОГІСТИК-ПЛЮС»', N'ТОВ «Логістик-Плюс»', '36987412', @lfTov);
 SET @cor5 = SCOPE_IDENTITY();
+
+INSERT dbo.PartyCategoryLink (PartyId, CategoryId) VALUES
+    (@cor1, @catSupplier), (@cor4, @catSupplier), (@cor6, @catSupplier), (@cor2, @catGov);
+
+-- Адреси (Kind: 1 — юридична, 2 — фактична, 3 — поштова)
+INSERT dbo.PartyAddress (PartyId, Kind, Country, PostalCode, Region, City, Line) VALUES
+    (@cor1, 1, N'Україна', N'61002', N'Харківська', N'Харків', N'вул. Сумська, 10'),
+    (@cor1, 3, N'Україна', N'61002', N'Харківська', N'Харків', N'вул. Сумська, 10, оф. 4'),
+    (@cor2, 1, N'Україна', N'61022', N'Харківська', N'Харків', N'пл. Свободи, 5'),
+    (@cor3, 3, N'Україна', N'61000', N'Харківська', N'Харків', N'вул. Полтавський шлях, 44'),
+    (@cor4, 1, N'Україна', N'01001', NULL,          N'Київ',   N'вул. Хрещатик, 1'),
+    (@cor4Branch, 2, N'Україна', N'61057', N'Харківська', N'Харків', N'вул. Пушкінська, 32'),
+    (@cor6, 1, N'Україна', N'62300', N'Харківська', N'Дергачі', N'вул. Садова, 3'),
+    (@cor5, 1, N'Україна', N'49000', N'Дніпропетровська', N'Дніпро', N'просп. Яворницького, 7');
+
+-- Контакти (Kind: 1 — телефон, 2 — email, 3 — сайт, 4 — адреса для обміну документами)
+INSERT dbo.PartyContact (PartyId, Kind, Value, IsPrimary) VALUES
+    (@cor1, 1, N'057-700-10-20', 1),
+    (@cor1, 2, N'office@promtechbud.example', 1),
+    (@cor1, 3, N'https://promtechbud.example', 0),
+    (@cor2, 2, N'osvita@kharkiv-oda.example', 1),
+    (@cor2, 4, N'СЕВ ОВВ: 02142632', 0),
+    (@cor3, 1, N'067-123-45-67', 1),
+    (@cor4, 1, N'044-200-00-01', 1),
+    (@cor4, 2, N'info@energopostach.example', 1),
+    (@cor6, 1, N'050-111-22-33', 1);
+
+INSERT dbo.PartyPerson (PartyId, FullName, PositionName, Phone, IsSignatory) VALUES
+    (@cor1, N'Гнатюк Олег Петрович', N'Директор', N'057-700-10-21', 1),
+    (@cor1, N'Литвин Ірина Сергіївна', N'Головний бухгалтер', N'057-700-10-22', 0),
+    (@cor2, N'Бойко Наталія Іванівна', N'Директор департаменту', NULL, 1),
+    (@cor4, N'Мороз Василь Васильович', N'Начальник юридичного відділу', NULL, 0);
+
+INSERT dbo.PartyBankAccount (PartyId, Iban, BankId, Currency, Purpose, IsPrimary) VALUES
+    (@cor1, 'UA183052990000026007052612345', @bankPrivat, 'UAH', N'Поточний', 1),
+    (@cor1, 'UA963052990000026003052698765', @bankPrivat, 'USD', N'Поточний валютний', 1),
+    (@cor2, 'UA368201720000035413001012345', @bankTreasury, 'UAH', N'Бюджетний', 1),
+    (@cor4, 'UA433004650000026004500123456', @bankOschad, 'UAH', N'Поточний', 1),
+    (@cor6, 'UA693220010000026009310011223', @bankUniversal, 'UAH', N'Поточний ФОП', 1),
+    (@cor5, 'UA943808050000026003380077777', @bankRaiff, 'UAH', N'Поточний', 1);
 
 -- ---- Документи (історію статусів пише тригер trg_Document_StatusHistory) ----
 DECLARE @doc1 int, @doc2 int, @doc3 int, @doc4 int, @doc5 int, @doc6 int, @doc7 int;

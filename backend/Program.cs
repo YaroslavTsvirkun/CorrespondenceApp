@@ -1,7 +1,7 @@
 using CorrespondenceApi.Common;
 using CorrespondenceApi.Features.Access;
 using CorrespondenceApi.Features.Auth;
-using CorrespondenceApi.Features.Correspondents;
+using CorrespondenceApi.Features.Parties;
 using CorrespondenceApi.Features.Departments;
 using CorrespondenceApi.Features.Dictionaries;
 using CorrespondenceApi.Features.Documents;
@@ -157,7 +157,7 @@ SettingsEndpoints.MapSettings(app);
 LookupsEndpoints.MapLookups(app);
 DocumentsEndpoints.MapDocuments(app);
 AttachmentsEndpoints.MapAttachments(app);
-CorrespondentsEndpoints.MapCorrespondents(app);
+PartiesEndpoints.MapParties(app);
 DepartmentsEndpoints.MapDepartments(app);
 EmployeesEndpoints.MapEmployees(app);
 TasksEndpoints.MapTasks(app);

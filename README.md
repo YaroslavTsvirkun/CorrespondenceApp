@@ -94,14 +94,14 @@ dotnet run -- --deploy-db   # створить/оновить БД і завер
 
 ```
 dataservice/Database/
-├── Schema/         001_Tables.sql          — таблиці, ключі, індекси (одноразово)
+├── Schema/         001..006_*.sql          — таблиці, ключі, індекси, зміни структури (одноразово)
 ├── Types/          *.sql                   — табличні типи (User-Defined Table Types)
 ├── TableFunctions/ fn_*.sql                — inline-табличні функції (щоразу, CREATE OR ALTER)
 ├── Functions/      fn_*.sql                — скалярні функції (щоразу, CREATE OR ALTER)
 ├── Views/          vw_*.sql                — представлення (щоразу, CREATE OR ALTER)
 ├── Procedures/     usp_*.sql               — збережені процедури (щоразу, CREATE OR ALTER)
 ├── Triggers/       trg_*.sql               — тригери (щоразу, CREATE OR ALTER)
-├── Seed/           001..004_*.sql          — довідники, пермішени, базові ролі (одноразово)
+├── Seed/           001..006_*.sql          — довідники, пермішени, базові ролі, банки й правові форми (одноразово)
 └── DemoSeed/       001..002_*.sql          — демо-дані й демо-користувачі (одноразово, лише з SeedDemoData)
 ```
 

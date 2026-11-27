@@ -45,7 +45,7 @@ export const services: ServiceDefinition[] = [
     icon: <IdcardOutlined />,
     path: '/parties',
     color: '#13a8a8',
-    permissions: [P.correspondents],
+    permissions: [P.parties, P.partiesBank],
     component: PartiesApp,
   },
   {

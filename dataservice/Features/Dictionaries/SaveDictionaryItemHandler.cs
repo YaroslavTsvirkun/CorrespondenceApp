@@ -8,11 +8,11 @@ using MediatR;
 namespace CorrespondenceSystem.DataService.Features.Dictionaries;
 
 /// <summary>Дані слайсу: створення / оновлення запису довідника.</summary>
-public sealed class SaveDictionaryItemHandler(Db db) : IRequestHandler<SaveDictionaryItem.Command, int>
+public sealed class SaveDictionaryItemHandler(Db db, ICurrentUser user) : IRequestHandler<SaveDictionaryItem.Command, int>
 {
     public async Task<int> Handle(SaveDictionaryItem.Command c, CancellationToken ct)
     {
-        var t = DictionaryTables.Resolve(c.Kind);
+        var t = DictionaryTables.ResolveForWrite(c.Kind, user);
         var param = new { c.Id, c.Data.Name, c.Data.Description, c.Data.Code };
 
         if (c.Id is null)

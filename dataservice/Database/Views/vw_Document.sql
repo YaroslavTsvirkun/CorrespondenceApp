@@ -11,7 +11,7 @@ SELECT d.Id,
        d.DocumentTypeId,       t.Code   AS DocumentTypeCode, t.Name AS DocumentType,
        d.CurrentStatusId,      s.Name   AS Status, s.IsFinal AS StatusIsFinal,
        d.DeliveryChannelId,    ch.Name  AS Channel,
-       d.CorrespondentId,      c.Name   AS Correspondent,
+       d.CorrespondentId,      COALESCE(c.ShortName, c.FullName) AS Correspondent,
        d.SenderDepartmentId,   sd.Name  AS SenderDepartment,
        d.ReceiverDepartmentId, rd.Name  AS ReceiverDepartment,
        d.AuthorEmployeeId,     a.FullName AS Author,
@@ -24,7 +24,7 @@ JOIN dbo.DocumentDirection dir     ON dir.Id = d.DirectionId
 JOIN dbo.DocumentType t            ON t.Id = d.DocumentTypeId
 JOIN dbo.DocumentStatus s          ON s.Id = d.CurrentStatusId
 LEFT JOIN dbo.DeliveryChannel ch   ON ch.Id = d.DeliveryChannelId
-LEFT JOIN dbo.Correspondent c      ON c.Id = d.CorrespondentId
+LEFT JOIN dbo.Party c              ON c.Id = d.CorrespondentId
 LEFT JOIN dbo.Department sd        ON sd.Id = d.SenderDepartmentId
 LEFT JOIN dbo.Department rd        ON rd.Id = d.ReceiverDepartmentId
 LEFT JOIN dbo.Employee a           ON a.Id = d.AuthorEmployeeId
