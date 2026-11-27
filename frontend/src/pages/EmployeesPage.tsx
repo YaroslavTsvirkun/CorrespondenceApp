@@ -1,14 +1,17 @@
 import { useMemo, useState } from 'react';
 import {
-  Button, Card, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Typography,
+  Button, Card, Form, Input, Modal, Popconfirm, Space, Switch, Table, Tabs, TreeSelect, Typography,
 } from 'antd';
 import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { useLookups } from '../data/lookups';
-import { opt } from '../data/options';
+import { api } from '../api/client';
+import { buildDepartmentTree, type DepartmentNode } from '../data/departmentTree';
 import { useAuth } from '../auth/AuthContext';
 import { P } from '../auth/permissions';
+import { useApiData } from '../hooks/useApi';
 import { useCrud } from '../hooks/useCrud';
+
+const loadDepartments = () => api<DepartmentNode[]>('/api/departments');
 
 interface Dto {
   id: number; fullName: string; positionName: string; departmentId: number;
@@ -16,7 +19,6 @@ interface Dto {
 }
 
 export default function EmployeesPage() {
-  const { lookups } = useLookups();
   const { can } = useAuth();
   const editable = can(P.employees);
   const [open, setOpen] = useState(false);
@@ -31,6 +33,11 @@ export default function EmployeesPage() {
   const inactiveCount = rows.length - activeCount;
   const visibleRows = useMemo(
     () => rows.filter((r) => r.isActive === (tab === 'active')), [rows, tab]);
+
+  // Підрозділи деревом: організація → підпорядкування, щоб однакові назви не плутались
+  const { data: departments } = useApiData(loadDepartments, []);
+  const departmentTree = useMemo(
+    () => buildDepartmentTree(departments, editing?.departmentId), [departments, editing]);
 
   const openAdd = () => { setEditing(null); form.resetFields(); form.setFieldsValue({ isActive: true }); setOpen(true); };
   const openEdit = (e: Dto) => { setEditing(e); form.setFieldsValue(e); setOpen(true); };
@@ -83,7 +90,9 @@ export default function EmployeesPage() {
           <Form.Item name="fullName" label="ПІБ" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="positionName" label="Посада" rules={[{ required: true }]}><Input /></Form.Item>
           <Form.Item name="departmentId" label="Підрозділ" rules={[{ required: true }]}>
-            <Select options={opt(lookups.departments)} />
+            <TreeSelect treeData={departmentTree} treeDefaultExpandAll treeNodeLabelProp="label"
+              showSearch treeNodeFilterProp="title" placeholder="Оберіть підрозділ"
+              listHeight={360} popupMatchSelectWidth={false} styles={{ popup: { root: { minWidth: 420 } } }} />
           </Form.Item>
           <Space wrap>
             <Form.Item name="phone" label="Телефон"><Input style={{ width: 220 }} /></Form.Item>
