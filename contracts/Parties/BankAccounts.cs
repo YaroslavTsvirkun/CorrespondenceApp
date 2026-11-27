@@ -81,3 +81,10 @@ public static class DeleteBank
     [RequirePermission(Permissions.PartiesBankManage)]
     public record Command(int Id) : IRequest;
 }
+
+/// <summary>Слайс: журнал змін банківських рахунків контрагента (нові записи — першими).</summary>
+public static class GetBankAccountHistory
+{
+    [RequirePermission(Permissions.PartiesRead)]
+    public record Query(int PartyId) : IRequest<IReadOnlyList<BankAccountHistoryItem>>;
+}

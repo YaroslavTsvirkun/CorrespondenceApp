@@ -94,7 +94,7 @@ dotnet run -- --deploy-db   # створить/оновить БД і завер
 
 ```
 dataservice/Database/
-├── Schema/         001..007_*.sql          — таблиці, ключі, індекси, зміни структури (одноразово)
+├── Schema/         001..008_*.sql          — таблиці, ключі, індекси, зміни структури (одноразово)
 ├── Types/          *.sql                   — табличні типи (User-Defined Table Types)
 ├── TableFunctions/ fn_*.sql                — inline-табличні функції (щоразу, CREATE OR ALTER)
 ├── Functions/      fn_*.sql                — скалярні функції (щоразу, CREATE OR ALTER)

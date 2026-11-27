@@ -107,3 +107,25 @@ public sealed class DeleteBankHandler(Db db) : IRequestHandler<DeleteBank.Comman
         }
     }
 }
+
+/// <summary>Дані слайсу: журнал змін рахунків контрагента організації користувача.</summary>
+public sealed class GetBankAccountHistoryHandler(Db db, ICurrentUser user)
+    : IRequestHandler<GetBankAccountHistory.Query, IReadOnlyList<BankAccountHistoryItem>>
+{
+    public async Task<IReadOnlyList<BankAccountHistoryItem>> Handle(GetBankAccountHistory.Query q, CancellationToken ct)
+    {
+        var p = SqlScope.Tenant(user);
+        p.Add("PartyId", q.PartyId);
+        var visible = await db.ScalarAsync<int>(
+            $"SELECT COUNT(*) FROM dbo.Party p WHERE p.Id = @PartyId AND {SqlScope.TenantFilter("p")}", p, ct);
+        if (visible == 0) throw new NotFoundException($"Контрагента #{q.PartyId} не знайдено");
+
+        return await db.QueryAsync<BankAccountHistoryItem>("""
+            SELECT h.Id, h.AccountId, h.Action, h.ChangedAt, u.FullName AS ChangedBy, h.OldValues, h.NewValues
+            FROM dbo.PartyBankAccountHistory h
+            LEFT JOIN dbo.AppUser u ON u.Id = h.ChangedByUserId
+            WHERE h.PartyId = @PartyId
+            ORDER BY h.ChangedAt DESC, h.Id DESC
+            """, p, ct);
+    }
+}

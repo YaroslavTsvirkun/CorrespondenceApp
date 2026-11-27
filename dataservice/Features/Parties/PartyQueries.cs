@@ -89,8 +89,14 @@ internal static class BankAccountSql
                COALESCE(b.Mfo, CASE WHEN a.Iban LIKE 'UA%' THEN SUBSTRING(a.Iban, 5, 6) END) AS Mfo,
                COALESCE(b.ShortName, b.Name, a.BankName) AS BankName,
                COALESCE(a.SwiftBic, b.SwiftBic) AS SwiftBic,
-               a.Currency, a.Purpose, a.AccountHolderName, a.IsPrimary, a.ClosedAt, a.Note
+               a.Currency, a.Purpose, a.AccountHolderName, a.IsPrimary, a.ClosedAt, a.Note,
+               last.ChangedAt AS LastChangedAt, last.ChangedBy AS LastChangedBy
         FROM dbo.PartyBankAccount a
         LEFT JOIN dbo.Bank b ON b.Id = a.BankId
+        OUTER APPLY (SELECT TOP (1) h.ChangedAt, u.FullName AS ChangedBy
+                     FROM dbo.PartyBankAccountHistory h
+                     LEFT JOIN dbo.AppUser u ON u.Id = h.ChangedByUserId
+                     WHERE h.AccountId = a.Id
+                     ORDER BY h.ChangedAt DESC, h.Id DESC) last
         """;
 }

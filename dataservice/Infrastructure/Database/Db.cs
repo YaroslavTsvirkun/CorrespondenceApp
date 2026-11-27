@@ -6,8 +6,8 @@ namespace CorrespondenceSystem.DataService.Infrastructure.Database;
 
 /// <summary>
 /// Фабрика підключень Dapper. Кожне відкрите підключення отримує в SESSION_CONTEXT
-/// ідентифікатор працівника поточного користувача — його використовують тригери БД
-/// (напр. історія статусів документа фіксує, хто змінив статус).
+/// ідентифікатори поточного користувача (UserId) і його працівника (EmployeeId) — їх використовують
+/// тригери БД (історія статусів документа, журнал змін банківських рахунків фіксують, хто змінив).
 /// </summary>
 public sealed class Db(DatabaseOptions options, ICurrentUser user)
 {
@@ -15,10 +15,11 @@ public sealed class Db(DatabaseOptions options, ICurrentUser user)
     {
         var connection = new SqlConnection(options.ConnectionString);
         await connection.OpenAsync(ct);
-        if (user.EmployeeId is int employeeId)
-            await connection.ExecuteAsync(new CommandDefinition(
-                "EXEC sp_set_session_context @key = N'EmployeeId', @value = @employeeId",
-                new { employeeId }, cancellationToken: ct));
+        if (user.UserId is not null)
+            await connection.ExecuteAsync(new CommandDefinition("""
+                EXEC sp_set_session_context @key = N'UserId', @value = @userId;
+                IF @employeeId IS NOT NULL EXEC sp_set_session_context @key = N'EmployeeId', @value = @employeeId;
+                """, new { userId = user.UserId, employeeId = user.EmployeeId }, cancellationToken: ct));
         return connection;
     }
 

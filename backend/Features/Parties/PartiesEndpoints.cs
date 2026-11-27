@@ -42,6 +42,10 @@ public static class PartiesEndpoints
         }).RequireAuthorization(Permissions.PartiesManage);
 
         // ---- Банківські рахунки контрагента ----
+        g.MapGet("/{partyId:int}/bank-accounts/history", async (ISender m, int partyId, CancellationToken ct) =>
+            Results.Ok(await m.Send(new GetBankAccountHistory.Query(partyId), ct)))
+            .RequireAuthorization(Permissions.PartiesRead);
+
         g.MapPost("/{partyId:int}/bank-accounts", async (ISender m, int partyId, BankAccountInput i, CancellationToken ct) =>
         {
             var id = await m.Send(new SaveBankAccount.Command(partyId, null, i), ct);

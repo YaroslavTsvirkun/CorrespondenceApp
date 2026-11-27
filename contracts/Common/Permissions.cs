@@ -29,6 +29,7 @@ public static class Permissions
     public const string DocumentsReadAny = "documents.read";
     public const string TasksWrite = "tasks.write";
     public const string DictionariesWrite = "dictionaries.write";
+    public const string PartiesRead = "parties.read";
 
     public static readonly string[] ReadScopes =
         [DocumentsReadAll, DocumentsReadDepartment, DocumentsReadInvolved];
@@ -39,5 +40,7 @@ public static class Permissions
         [TasksWrite] = [TasksAssign, TasksExecute],
         // Довідники кореспонденції (dictionaries.manage) і контрагентів (parties.manage) — див. DictionaryTables
         [DictionariesWrite] = [DictionariesManage, PartiesManage],
+        // Робота з реєстром контрагентів (ведення реквізитів або банківських рахунків)
+        [PartiesRead] = [PartiesManage, PartiesBankManage],
     };
 }

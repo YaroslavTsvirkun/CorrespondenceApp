@@ -203,6 +203,77 @@ public sealed class PartiesTests(DataServiceFactory app)
     }
 
     [Fact]
+    public async Task Bank_account_changes_are_logged_with_user_and_values()
+    {
+        var registrar = await Registrar();
+        var orgAdmin = await OrgAdmin();
+        var partyId = await app.RpcOkAsync<int>(new SaveParty.Command(null, NewParty("ТОВ «Тест-журнал»")), registrar);
+        try
+        {
+            var account = new BankAccountInput("UA423052990000026001111222233", null, null, "UAH", "Поточний", null, true, null, null);
+            var id = await app.RpcOkAsync<int>(new SaveBankAccount.Command(partyId, null, account), orgAdmin);
+            await EnsureStatusAsync(await app.RpcAsync(new SaveBankAccount.Command(partyId, id,
+                account with { Iban = "UA953052990000026004444555566" }), orgAdmin), HttpStatusCode.OK);
+
+            // Повторне збереження без змін журнал не засмічує
+            await EnsureStatusAsync(await app.RpcAsync(new SaveBankAccount.Command(partyId, id,
+                account with { Iban = "UA953052990000026004444555566" }), orgAdmin), HttpStatusCode.OK);
+
+            var saved = (await app.RpcOkAsync<PartyDetail>(new GetParty.Query(partyId), registrar)).BankAccounts.Single();
+            Assert.Equal("Адмін «Промінь»", saved.LastChangedBy);
+            Assert.NotNull(saved.LastChangedAt);
+
+            await EnsureStatusAsync(await app.RpcAsync(new DeleteBankAccount.Command(partyId, id), orgAdmin), HttpStatusCode.NoContent);
+
+            // Реєстратор (parties.manage) бачить журнал, хоча змінювати рахунки не може
+            var history = await app.RpcOkAsync<IReadOnlyList<BankAccountHistoryItem>>(new GetBankAccountHistory.Query(partyId), registrar);
+            Assert.Equal([(byte)3, (byte)2, (byte)1], history.Select(h => h.Action));
+            Assert.All(history, h => Assert.Equal("Адмін «Промінь»", h.ChangedBy));
+            var change = history[1];
+            Assert.Contains("UA423052990000026001111222233", change.OldValues);
+            Assert.Contains("UA953052990000026004444555566", change.NewValues);
+            Assert.Contains("ПриватБанк", change.NewValues);
+            Assert.Null(history[0].NewValues);
+
+            var executor = await UserId("executor", "executor123");
+            var forbidden = await app.RpcAsync(new GetBankAccountHistory.Query(partyId), executor);
+            Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        }
+        finally
+        {
+            await EnsureStatusAsync(await app.RpcAsync(new DeleteParty.Command(partyId), registrar), HttpStatusCode.NoContent);
+        }
+    }
+
+    [Fact]
+    public async Task Linking_account_to_new_bank_is_not_logged_as_change()
+    {
+        var registrar = await Registrar();
+        var orgAdmin = await OrgAdmin();
+        var partyId = await app.RpcOkAsync<int>(new SaveParty.Command(null, NewParty("ТОВ «Тест-новий банк»")), registrar);
+        int? bankId = null;
+        try
+        {
+            // МФО 399999 немає в довіднику — рахунок без банку
+            await app.RpcOkAsync<int>(new SaveBankAccount.Command(partyId, null, new BankAccountInput(
+                "UA033999990000026007777888899", "Тестовий банк", null, "UAH", null, null, true, null, null)), orgAdmin);
+            bankId = await app.RpcOkAsync<int>(new SaveBank.Command(null,
+                new BankInput("399999", "АТ «Тестовий банк»", null, null, null, true)), orgAdmin);
+
+            var account = (await app.RpcOkAsync<PartyDetail>(new GetParty.Query(partyId), registrar)).BankAccounts.Single();
+            Assert.Equal(bankId, account.BankId);
+            var history = await app.RpcOkAsync<IReadOnlyList<BankAccountHistoryItem>>(new GetBankAccountHistory.Query(partyId), registrar);
+            Assert.Single(history);
+        }
+        finally
+        {
+            await EnsureStatusAsync(await app.RpcAsync(new DeleteParty.Command(partyId), registrar), HttpStatusCode.NoContent);
+            if (bankId is int b)
+                await EnsureStatusAsync(await app.RpcAsync(new DeleteBank.Command(b), orgAdmin), HttpStatusCode.NoContent);
+        }
+    }
+
+    [Fact]
     public async Task Bank_with_accounts_cannot_be_deleted()
     {
         var orgAdmin = await OrgAdmin();

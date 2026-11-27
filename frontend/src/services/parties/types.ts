@@ -1,3 +1,5 @@
+import dayjs from 'dayjs';
+
 // Типи API сервісу «Контрагенти» (contracts/Parties/Dtos).
 
 export interface PartyListItem {
@@ -14,6 +16,8 @@ export interface PartyPerson { fullName: string; positionName?: string; phone?: 
 export interface BankAccount {
   id: number; iban: string; bankId?: number; mfo?: string; bankName?: string; swiftBic?: string;
   currency: string; purpose?: string; accountHolderName?: string; isPrimary: boolean; closedAt?: string; note?: string;
+  /** Остання зміна рахунку з журналу (UTC) і хто її зробив */
+  lastChangedAt?: string; lastChangedBy?: string;
 }
 
 export interface PartyDetail {
@@ -42,3 +46,6 @@ export const CONTACT_KINDS = [
 ];
 
 export const KIND_COLORS: Record<number, string> = { 1: 'blue', 2: 'purple', 3: 'green', 4: 'gold' };
+
+/** Час з сервера — UTC (SYSUTCDATETIME) без позначки зони. */
+export const fromUtc = (s: string) => dayjs(/[zZ]|[+-]dd:dd$/.test(s) ? s : `${s}Z`);
