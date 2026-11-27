@@ -12,6 +12,20 @@ export default defineConfig({
   plugins: [react()],
   // Модульні тести (npm test): хуки й HTTP-клієнт у jsdom
   test: { environment: 'jsdom', include: ['src/**/*.test.{ts,tsx}'] },
+  build: {
+    rolldownOptions: {
+      output: {
+        // React — окремим файлом: змінюється рідко, тож після оновлення застосунку браузер бере його з кешу.
+        // antd свідомо не виділяємо: компоненти, потрібні лише окремим сервісам, мають вантажитися разом
+        // із сервісом (lazy-імпорт у services/registry.tsx), а не всі одразу.
+        codeSplitting: {
+          groups: [
+            { name: 'react', test: /node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/ },
+          ],
+        },
+      },
+    },
+  },
   server: {
     port: process.env.PORT ? Number(process.env.PORT) : 5180,
     proxy: {

@@ -1,14 +1,24 @@
-import type { ComponentType, ReactNode } from 'react';
+import { lazy, type ComponentType, type LazyExoticComponent, type ReactNode } from 'react';
 import { MailOutlined, ControlOutlined, ClusterOutlined, IdcardOutlined } from '@ant-design/icons';
 import { P } from '../auth/permissions';
-import CorrespondenceApp from './correspondence/CorrespondenceApp';
-import AdminApp from './admin/AdminApp';
-import OrgStructureApp from './org/OrgStructureApp';
-import PartiesApp from './parties/PartiesApp';
 
 // Каталог сервісів, що показуються на стартовій сторінці після входу.
-// Щоб додати новий сервіс: створіть його компонент (на основі ServiceLayout) і опишіть тут —
-// маршрут `${path}/*` App.tsx зареєструє сам.
+// Щоб додати новий сервіс: створіть його компонент (на основі ServiceLayout) і опишіть тут через
+// lazyService(() => import(...)) — маршрут `${path}/*` App.tsx зареєструє сам.
+// Код кожного сервісу — окремий файл збірки: він завантажується лише при вході в сервіс
+// (або заздалегідь — коли користувач наводить на картку сервісу).
+
+/** Сервіс, що завантажується на вимогу: компонент для маршруту і попереднє завантаження коду. */
+interface LazyService {
+  component: LazyExoticComponent<ComponentType>;
+  preload: () => void;
+}
+
+function lazyService(load: () => Promise<{ default: ComponentType }>): LazyService {
+  let pending: Promise<{ default: ComponentType }> | undefined;
+  const once = () => (pending ??= load());
+  return { component: lazy(once), preload: () => { once().catch(() => { pending = undefined; }); } };
+}
 export interface ServiceDefinition {
   id: string;
   title: string;
@@ -20,7 +30,8 @@ export interface ServiceDefinition {
   color: string;
   /** Пермішени сервісу: сервіс доступний, якщо користувач має хоча б один із них */
   permissions: readonly string[];
-  component: ComponentType;
+  /** Код сервісу (завантажується на вимогу) */
+  app: LazyService;
 }
 
 export const services: ServiceDefinition[] = [
@@ -36,7 +47,7 @@ export const services: ServiceDefinition[] = [
       P.tasksAssign, P.tasksExecute, P.dictionaries, P.reports,
       P.dashOverview, P.dashControl, P.dashMyTasks, P.settings,
     ],
-    component: CorrespondenceApp,
+    app: lazyService(() => import('./correspondence/CorrespondenceApp')),
   },
   {
     id: 'parties',
@@ -46,7 +57,7 @@ export const services: ServiceDefinition[] = [
     path: '/parties',
     color: '#13a8a8',
     permissions: [P.parties, P.partiesBank],
-    component: PartiesApp,
+    app: lazyService(() => import('./parties/PartiesApp')),
   },
   {
     id: 'org',
@@ -56,7 +67,7 @@ export const services: ServiceDefinition[] = [
     path: '/org',
     color: '#389e0d',
     permissions: [P.departments, P.employees],
-    component: OrgStructureApp,
+    app: lazyService(() => import('./org/OrgStructureApp')),
   },
   {
     id: 'admin',
@@ -66,7 +77,7 @@ export const services: ServiceDefinition[] = [
     path: '/admin',
     color: '#722ed1',
     permissions: [P.users, P.organizations],
-    component: AdminApp,
+    app: lazyService(() => import('./admin/AdminApp')),
   },
 ];
 

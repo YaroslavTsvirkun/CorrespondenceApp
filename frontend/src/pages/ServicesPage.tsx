@@ -35,6 +35,8 @@ export default function ServicesPage() {
                 <Card
                   hoverable
                   onClick={() => navigate(s.path)}
+                  // Наведення на картку — завантажити код сервісу заздалегідь, щоб вхід був миттєвим
+                  onMouseEnter={s.app.preload} onFocus={s.app.preload}
                   style={{ height: '100%', borderTop: `4px solid ${s.color}` }}
                 >
                   <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
